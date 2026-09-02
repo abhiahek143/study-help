@@ -1,416 +1,378 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Study Sync — Watch Together</title>
-
-<!-- PeerJS: free WebRTC signaling (uses PeerJS's free public cloud broker).
-     Actual video/audio goes directly browser-to-browser (P2P) once
-     connected — no call-time limit, no minutes cap. -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Together — watch &amp; talk</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: Arial, Helvetica, sans-serif;
-    background: #1e1e2f;
-    color: #f0f0f0;
+  :root{
+    --bg: #0f1210;
+    --panel: #171b18;
+    --line: #2a302b;
+    --text: #eef1ec;
+    --muted: #8f9a90;
+    --accent: #ffb454;
+    --accent-dim: #6b5a34;
+    --danger: #e0654f;
   }
-  header {
-    padding: 14px 20px;
-    background: #262640;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height:100vh;
   }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
+  header{
+    padding:20px 24px 14px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    flex-wrap:wrap;
   }
-  #setup {
-    max-width: 500px;
-    margin: 60px auto;
-    background: #262640;
-    padding: 24px;
-    border-radius: 10px;
+  header h1{
+    font-size:20px;
+    margin:0;
+    font-weight:600;
+    letter-spacing:.2px;
   }
-  #setup input {
-    width: 100%;
-    padding: 10px;
-    margin: 8px 0 16px;
-    border-radius: 6px;
-    border: none;
-    font-size: 14px;
+  header span.tag{
+    color:var(--muted);
+    font-size:13px;
   }
-  #setup button, .btn {
-    background: #5865f2;
-    color: white;
-    border: none;
-    padding: 10px 18px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 14px;
+  .layout{
+    display:grid;
+    grid-template-columns: 1fr 300px;
+    gap:0;
+    min-height:calc(100vh - 66px);
   }
-  #setup button:hover, .btn:hover { background: #4752c4; }
-  #app { display: none; }
-  .main-layout {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    padding: 16px;
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr;}
   }
-  #youtube-col { flex: 2; min-width: 320px; }
-  #call-col { flex: 1; min-width: 280px; }
-  #player {
-    width: 100%;
-    aspect-ratio: 16/9;
-    background: black;
-    border-radius: 8px;
-    overflow: hidden;
+  .stage{
+    padding:24px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
   }
-  #call-frame-container {
-    width: 100%;
-    height: 360px;
-    background: #000;
-    border-radius: 8px;
-    overflow: hidden;
-    position: relative;
+  .player-wrap{
+    position:relative;
+    width:100%;
+    aspect-ratio:16/9;
+    background:#000;
+    border:1px solid var(--line);
+    border-radius:4px;
+    overflow:hidden;
   }
-  #remoteVideo {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #000;
+  #yt-player{ width:100%; height:100%; }
+  .load-row{
+    display:flex;
+    gap:8px;
   }
-  #localVideo {
-    position: absolute;
-    width: 100px;
-    height: 75px;
-    right: 10px;
-    top: 10px;
-    border-radius: 6px;
-    object-fit: cover;
-    border: 2px solid #5865f2;
-    background: #111;
+  .load-row input{
+    flex:1;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:10px 12px;
+    border-radius:4px;
+    font-size:14px;
   }
-  #callPlaceholder {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    color: #a0a0c0;
-    text-align: center;
-    padding: 20px;
+  .load-row input::placeholder{color:var(--muted);}
+  button{
+    background:var(--accent);
+    color:#1a1508;
+    border:none;
+    padding:10px 16px;
+    border-radius:4px;
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
   }
-  .controls {
-    margin-top: 12px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
+  button:hover{filter:brightness(1.08);}
+  button.secondary{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--text);
   }
-  .controls input {
-    flex: 1;
-    min-width: 200px;
-    padding: 8px;
-    border-radius: 6px;
-    border: none;
+  button:disabled{
+    opacity:.4;
+    cursor:not-allowed;
   }
-  #status {
-    margin-top: 10px;
-    font-size: 13px;
-    color: #a0a0c0;
+  .sidebar{
+    border-left:1px solid var(--line);
+    padding:24px;
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+  }
+  .block{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .block h2{
+    font-size:12px;
+    color:var(--muted);
+    margin:0 0 2px;
+    font-weight:600;
+  }
+  .id-box{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:10px 12px;
+    font-family:monospace;
+    font-size:14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+  }
+  .id-box code{color:var(--accent); word-break:break-all;}
+  .status{
+    font-size:13px;
+    color:var(--muted);
+  }
+  .status.live{color:#8bd28e;}
+  .videos{
+    display:flex;
+    gap:8px;
+  }
+  .video-tile{
+    flex:1;
+    aspect-ratio:4/3;
+    background:#000;
+    border:1px solid var(--line);
+    border-radius:4px;
+    overflow:hidden;
+    position:relative;
+  }
+  .video-tile video{width:100%;height:100%;object-fit:cover;}
+  .video-tile span{
+    position:absolute;
+    bottom:4px;
+    left:6px;
+    font-size:11px;
+    color:var(--muted);
+    background:rgba(0,0,0,.5);
+    padding:1px 5px;
+    border-radius:3px;
+  }
+  .connect-row{display:flex; gap:8px;}
+  .connect-row input{
+    flex:1;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:8px 10px;
+    border-radius:4px;
+    font-family:monospace;
+    font-size:13px;
   }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>📚 Study Sync</h1>
-  <div id="statusBadge" style="font-size:13px; color:#a0a0c0;"></div>
+  <h1>Together</h1>
+  <span class="tag">talk while you watch — nothing stored, nothing billed</span>
 </header>
 
-<!-- STEP 1: Setup screen — enter a room name -->
-<div id="setup">
-  <h2>Join your study room</h2>
-  <p style="font-size:13px; color:#c0c0d0;">
-    No account needed. Just pick a room name — anything works, as long as
-    both of you type the exact same name. Think of it like a shared password.
-  </p>
-  <label>Room Name</label>
-  <input id="roomUrlInput" type="text" placeholder="e.g. abhi-study-room-42" />
-  <label>Your Name</label>
-  <input id="nameInput" type="text" placeholder="e.g. Alex" />
-  <button id="joinBtn" class="btn">Join Room</button>
-</div>
+<div class="layout">
 
-<!-- STEP 2: Main app (hidden until joined) -->
-<div id="app">
-  <div class="main-layout">
-    <div id="youtube-col">
-      <div id="player"></div>
-      <div class="controls">
-        <input id="ytUrlInput" type="text" placeholder="Paste a YouTube video URL and press Load" />
-        <button id="loadVideoBtn" class="btn">Load</button>
+  <div class="stage">
+    <div class="load-row">
+      <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
+      <button id="loadBtn">Load</button>
+    </div>
+    <div class="player-wrap">
+      <div id="yt-player"></div>
+    </div>
+  </div>
+
+  <div class="sidebar">
+
+    <div class="block">
+      <h2>Your ID</h2>
+      <div class="id-box">
+        <code id="myId">generating…</code>
+        <button class="secondary" id="copyBtn">Copy</button>
       </div>
-      <div id="status">Waiting for video...</div>
+      <div class="status" id="peerStatus">Waiting for connection…</div>
     </div>
 
-    <div id="call-col">
-      <div id="call-frame-container">
-        <video id="remoteVideo" autoplay playsinline></video>
-        <video id="localVideo" autoplay playsinline muted></video>
-        <div id="callPlaceholder">Waiting for your partner to join the room…</div>
+    <div class="block">
+      <h2>Connect to a friend</h2>
+      <div class="connect-row">
+        <input id="friendId" placeholder="Paste their ID here" />
+        <button id="connectBtn">Call</button>
       </div>
     </div>
+
+    <div class="block">
+      <h2>Video call</h2>
+      <div class="videos">
+        <div class="video-tile">
+          <video id="localVideo" autoplay muted playsinline></video>
+          <span>You</span>
+        </div>
+        <div class="video-tile">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <span>Friend</span>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
 <script>
-/* ======================================================
-   STUDY SYNC — WebRTC (PeerJS) + YouTube IFrame API
-   Free, no signup, no card, no call-time limit.
-   Video/audio go directly browser-to-browser (P2P) once
-   connected — PeerJS's free public server is only used to
-   help the two browsers find each other (signaling).
-   ====================================================== */
+/* ---------- PeerJS setup ---------- */
+let peer, localStream, mediaConn, dataConn;
+const myIdEl = document.getElementById('myId');
+const peerStatusEl = document.getElementById('peerStatus');
+const localVideo = document.getElementById('localVideo');
+const remoteVideo = document.getElementById('remoteVideo');
 
-let peer = null;
-let localStream = null;
-let dataConn = null;      // WebRTC data channel, used for YT sync messages
-let player = null;          // YouTube player instance
-let ytApiReady = false;     // becomes true when YT API script loads
-let pendingVideoId = null;  // video to load once player is ready
+async function initPeer(){
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    localVideo.srcObject = localStream;
+  }catch(e){
+    peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
+  }
 
-// This is the key to preventing infinite sync loops.
-// A single boolean isn't enough — one seekTo()+play() call can trigger
-// MULTIPLE state-change events (e.g. buffering, then playing), so a
-// one-shot flag gets "used up" by the first event and the second one
-// slips through and re-broadcasts, causing a play/pause ping-pong loop.
-// Instead we suppress ALL outgoing broadcasts for a short time window
-// after applying a remote action.
-let suppressBroadcastUntil = 0;
-const SUPPRESS_WINDOW_MS = 1500;
+  peer = new Peer(); // uses PeerJS free public broker, no server needed
 
-/* ---------- 1. Load the YouTube IFrame API dynamically ---------- */
-function loadYouTubeAPI() {
-  const tag = document.createElement('script');
-  tag.src = "https://www.youtube.com/iframe_api";
-  document.head.appendChild(tag);
+  peer.on('open', id => { myIdEl.textContent = id; });
+
+  peer.on('call', call => {
+    call.answer(localStream);
+    call.on('stream', remoteStream => { remoteVideo.srcObject = remoteStream; });
+    mediaConn = call;
+    setStatus(true);
+  });
+
+  peer.on('connection', conn => {
+    dataConn = conn;
+    wireData();
+    setStatus(true);
+  });
+
+  peer.on('error', err => {
+    peerStatusEl.textContent = 'Connection error: ' + err.type;
+  });
 }
 
-// Required global callback — YouTube API calls this automatically
-// once it has finished loading.
-window.onYouTubeIframeAPIReady = function () {
-  ytApiReady = true;
-  player = new YT.Player('player', {
+document.getElementById('copyBtn').onclick = () => {
+  navigator.clipboard.writeText(myIdEl.textContent);
+  const b = document.getElementById('copyBtn');
+  b.textContent = 'Copied';
+  setTimeout(()=> b.textContent = 'Copy', 1200);
+};
+
+document.getElementById('connectBtn').onclick = () => {
+  const friendId = document.getElementById('friendId').value.trim();
+  if(!friendId) return;
+
+  if(localStream){
+    mediaConn = peer.call(friendId, localStream);
+    mediaConn.on('stream', remoteStream => { remoteVideo.srcObject = remoteStream; });
+  }
+
+  dataConn = peer.connect(friendId);
+  dataConn.on('open', () => setStatus(true));
+  wireData();
+};
+
+function setStatus(live){
+  peerStatusEl.textContent = live ? 'Connected' : 'Waiting for connection…';
+  peerStatusEl.className = 'status' + (live ? ' live' : '');
+}
+
+/* ---------- Data channel: sync YouTube playback ---------- */
+let applyingRemote = false; // guards against echoing our own sync back out
+
+function wireData(){
+  dataConn.on('data', msg => {
+    applyingRemote = true;
+    if(msg.type === 'load'){
+      player.loadVideoById(msg.videoId);
+    } else if(msg.type === 'play'){
+      player.seekTo(msg.time, true);
+      player.playVideo();
+    } else if(msg.type === 'pause'){
+      player.seekTo(msg.time, true);
+      player.pauseVideo();
+    } else if(msg.type === 'seek'){
+      player.seekTo(msg.time, true);
+    }
+    setTimeout(()=> applyingRemote = false, 400);
+  });
+}
+
+function sendSync(payload){
+  if(dataConn && dataConn.open && !applyingRemote){
+    dataConn.send(payload);
+  }
+}
+
+/* ---------- YouTube IFrame player ---------- */
+let player;
+let lastKnownTime = 0;
+
+function onYouTubeIframeAPIReady(){
+  player = new YT.Player('yt-player', {
     height: '100%',
     width: '100%',
-    videoId: pendingVideoId || '',
-    playerVars: { rel: 0 },
+    playerVars: { rel:0, modestbranding:1 },
     events: {
       onStateChange: onPlayerStateChange
     }
   });
+}
+const ytTag = document.createElement('script');
+ytTag.src = "https://www.youtube.com/iframe_api";
+document.head.appendChild(ytTag);
+
+function onPlayerStateChange(e){
+  if(applyingRemote) return;
+  const time = player.getCurrentTime();
+  if(e.data === YT.PlayerState.PLAYING){
+    sendSync({ type:'play', time });
+  } else if(e.data === YT.PlayerState.PAUSED){
+    sendSync({ type:'pause', time });
+  }
+  lastKnownTime = time;
+}
+
+function extractVideoId(input){
+  input = input.trim();
+  const patterns = [
+    /(?:youtu\.be\/)([\w-]{11})/,
+    /(?:youtube\.com\/watch\?v=)([\w-]{11})/,
+    /(?:youtube\.com\/embed\/)([\w-]{11})/
+  ];
+  for(const p of patterns){
+    const m = input.match(p);
+    if(m) return m[1];
+  }
+  if(/^[\w-]{11}$/.test(input)) return input;
+  return null;
+}
+
+document.getElementById('loadBtn').onclick = () => {
+  const raw = document.getElementById('ytInput').value;
+  const id = extractVideoId(raw);
+  if(!id){ alert('Could not read a video ID from that link.'); return; }
+  player.loadVideoById(id);
+  sendSync({ type:'load', videoId:id });
 };
 
-/* ---------- 2. Handle local play/pause events ---------- */
-function onPlayerStateChange(event) {
-  // If we're inside the suppression window (a remote sync action was just
-  // applied), skip broadcasting entirely — otherwise we'd create an
-  // infinite ping-pong between the two browsers.
-  if (Date.now() < suppressBroadcastUntil) {
-    return;
-  }
-
-  if (event.data === YT.PlayerState.PLAYING) {
-    broadcast('play', player.getCurrentTime());
-  } else if (event.data === YT.PlayerState.PAUSED) {
-    broadcast('pause', player.getCurrentTime());
-  }
-}
-
-/* ---------- 3. Send the sync message via the WebRTC data channel ---------- */
-let lastBroadcast = { action: null, time: 0, at: 0 };
-
-function broadcast(action, time) {
-  if (!dataConn || !dataConn.open) return;
-
-  // Extra safety: if we just sent this exact same action a moment ago,
-  // don't send it again (guards against duplicate YT events firing back
-  // to back for the same user action).
-  const now = Date.now();
-  if (
-    lastBroadcast.action === action &&
-    Math.abs(lastBroadcast.time - time) < 1 &&
-    now - lastBroadcast.at < 800
-  ) {
-    return;
-  }
-  lastBroadcast = { action, time, at: now };
-
-  dataConn.send({ type: 'yt-sync', action: action, time: time });
-  setStatus(`You: ${action} @ ${time.toFixed(1)}s`);
-}
-
-function broadcastLoad(videoId) {
-  if (!dataConn || !dataConn.open) return;
-  dataConn.send({ type: 'yt-load', videoId: videoId });
-}
-
-/* ---------- 4. Receive sync messages from the other person ---------- */
-function handleMessage(data) {
-  if (!data || !player) return;
-
-  if (data.type === 'yt-sync') {
-    // Open the suppression window BEFORE applying the change, and keep
-    // it open for SUPPRESS_WINDOW_MS so every state-change event this
-    // triggers (buffering, playing, etc.) is ignored for broadcast.
-    suppressBroadcastUntil = Date.now() + SUPPRESS_WINDOW_MS;
-
-    player.seekTo(data.time, true);
-    if (data.action === 'play') {
-      player.playVideo();
-    } else if (data.action === 'pause') {
-      player.pauseVideo();
-    }
-    setStatus(`Partner: ${data.action} @ ${data.time.toFixed(1)}s`);
-  }
-
-  if (data.type === 'yt-load') {
-    suppressBroadcastUntil = Date.now() + SUPPRESS_WINDOW_MS;
-    player.loadVideoById(data.videoId);
-    setStatus('Partner loaded a new video');
-  }
-}
-
-/* ---------- 5. Load a video from a pasted YouTube URL ---------- */
-function extractVideoId(url) {
-  const match = url.match(/(?:v=|\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
-  return match ? match[1] : null;
-}
-
-function loadVideo(url) {
-  const id = extractVideoId(url);
-  if (!id) {
-    alert('Could not read a video ID from that URL.');
-    return;
-  }
-  if (player && ytApiReady) {
-    player.loadVideoById(id);
-    broadcastLoad(id);
-  } else {
-    pendingVideoId = id;
-  }
-}
-
-/* ---------- 6. WebRTC call setup (PeerJS) ----------
-   Two-person room pattern: the room name maps to a fixed "host" peer ID.
-   Whoever opens the room first claims that ID and waits. The second
-   person's ID is already taken, so they fall back to a random ID and
-   call + data-connect to the host ID instead. This needs no backend of
-   our own — PeerJS's free cloud signaling server just helps the two
-   browsers exchange connection info; the media stream itself is
-   peer-to-peer, so there's no time limit and no minutes cap. */
-function joinCall(roomName, userName) {
-  const hostId = 'studysync-' + roomName.trim().toLowerCase().replace(/\s+/g, '-');
-
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-      localStream = stream;
-      document.getElementById('localVideo').srcObject = stream;
-      startPeer(hostId);
-    })
-    .catch(err => {
-      console.error(err);
-      alert('Camera/microphone access is needed for the video call. Please allow permissions and try again.');
-    });
-}
-
-function startPeer(hostId) {
-  peer = new Peer(hostId);
-
-  peer.on('open', () => {
-    // We successfully claimed the host ID — we're first in the room.
-    setStatus('Waiting for your partner to join…');
-  });
-
-  // Someone calls us with their video/audio.
-  peer.on('call', call => {
-    call.answer(localStream);
-    call.on('stream', remoteStream => onRemoteStream(remoteStream));
-  });
-
-  // Someone opens a data channel to us (for YT sync messages).
-  peer.on('connection', conn => {
-    dataConn = conn;
-    dataConn.on('open', () => setStatus('Connected to call ✅'));
-    dataConn.on('data', data => handleMessage(data));
-  });
-
-  peer.on('error', err => {
-    if (err.type === 'unavailable-id') {
-      // The host ID is already taken — someone's already in the room.
-      // Become the "guest": get a random ID, then call + connect to host.
-      becomeGuest(hostId);
-    } else {
-      console.error('PeerJS error:', err);
-    }
-  });
-}
-
-function becomeGuest(hostId) {
-  peer = new Peer();
-
-  peer.on('open', () => {
-    const call = peer.call(hostId, localStream);
-    call.on('stream', remoteStream => onRemoteStream(remoteStream));
-
-    dataConn = peer.connect(hostId);
-    dataConn.on('open', () => setStatus('Connected to call ✅'));
-    dataConn.on('data', data => handleMessage(data));
-  });
-
-  peer.on('error', err => console.error('PeerJS error:', err));
-}
-
-function onRemoteStream(remoteStream) {
-  document.getElementById('remoteVideo').srcObject = remoteStream;
-  document.getElementById('callPlaceholder').style.display = 'none';
-  setStatus('Connected to call ✅');
-}
-
-/* ---------- UI wiring ---------- */
-function setStatus(msg) {
-  document.getElementById('status').textContent = msg;
-}
-
-document.getElementById('joinBtn').addEventListener('click', () => {
-  const roomName = document.getElementById('roomUrlInput').value.trim();
-  const name = document.getElementById('nameInput').value.trim() || 'Guest';
-
-  if (!roomName) {
-    alert('Please enter a room name.');
-    return;
-  }
-
-  document.getElementById('setup').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-
-  loadYouTubeAPI();
-  joinCall(roomName, name);
-});
-
-document.getElementById('loadVideoBtn').addEventListener('click', () => {
-  const url = document.getElementById('ytUrlInput').value.trim();
-  if (url) loadVideo(url);
-});
+initPeer();
 </script>
 
 </body>
