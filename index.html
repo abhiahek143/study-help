@@ -196,21 +196,13 @@
   <div class="sidebar">
 
     <div class="block">
-      <h2>Your ID</h2>
-      <div class="id-box">
-        <code id="myId">generating…</code>
-        <button class="secondary" id="copyBtn">Copy</button>
-      </div>
-      <button class="secondary" id="newIdBtn" style="align-self:flex-start;">Generate new ID</button>
-      <div class="status" id="peerStatus">Waiting for connection…</div>
-    </div>
-
-    <div class="block">
-      <h2>Connect to a friend</h2>
+      <h2>Room code</h2>
       <div class="connect-row">
-        <input id="friendId" placeholder="Paste their ID here" />
-        <button id="connectBtn">Call</button>
+        <input id="roomInput" placeholder="e.g. movienight" />
+        <button id="joinBtn">Join</button>
       </div>
+      <div class="status" id="peerStatus">Enter a room code — whoever types the same one lands in the same room.</div>
+      <button class="secondary" id="leaveBtn" style="align-self:flex-start; display:none;">Leave room</button>
     </div>
 
     <div class="block">
@@ -233,37 +225,39 @@
 
 <script>
 /* ---------- PeerJS setup ---------- */
-let peer, localStream, mediaConn, dataConn;
-const myIdEl = document.getElementById('myId');
+let peer, localStream, mediaConn, dataConn, roomHostId, role;
 const peerStatusEl = document.getElementById('peerStatus');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
+const roomInput = document.getElementById('roomInput');
+const leaveBtn = document.getElementById('leaveBtn');
 
-/* Keep the same Peer ID across visits (stored in this browser) instead of
-   a fresh random one every reload. "Generate new ID" clears it on demand. */
-function getStoredId(){
-  return localStorage.getItem('together-peer-id');
-}
-function makeShortId(){
-  return 'twg-' + Math.random().toString(36).slice(2, 8);
+// Public STUN + a free public TURN relay, so calls still connect across
+// mobile networks / strict NATs where plain STUN alone fails.
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ]
+};
+
+function sanitizeRoom(code){
+  return code.trim().toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,24);
 }
 
-async function initPeer(){
+async function ensureLocalStream(){
+  if(localStream) return;
   try{
     localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
     localVideo.srcObject = localStream;
   }catch(e){
     peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
   }
+}
 
-  let myId = getStoredId() || makeShortId();
-  peer = new Peer(myId); // uses PeerJS free public broker, no server needed
-
-  peer.on('open', id => {
-    myIdEl.textContent = id;
-    localStorage.setItem('together-peer-id', id);
-  });
-
+function bindPeerHandlers(){
   peer.on('call', call => {
     call.answer(localStream);
     call.on('stream', remoteStream => {
@@ -271,7 +265,6 @@ async function initPeer(){
       remoteVideo.play().catch(()=>{});
     });
     mediaConn = call;
-    setStatus(true);
   });
 
   peer.on('connection', conn => {
@@ -279,32 +272,75 @@ async function initPeer(){
     dataConn.on('open', () => { setStatus(true); flushQueue(); });
     wireData();
   });
+}
+
+// The first person to type a room code becomes the "room" itself (their
+// Peer ID = the room code). Whoever types the same code next finds that ID
+// already taken, so they connect to it as a guest instead — no manual ID
+// copy-pasting needed on either side.
+async function joinRoom(code){
+  await ensureLocalStream();
+  roomHostId = 'room-' + code;
+  peerStatusEl.textContent = 'Joining "' + code + '"…';
+
+  peer = new Peer(roomHostId, { config: ICE_CONFIG });
+  bindPeerHandlers();
+
+  peer.on('open', () => {
+    role = 'host';
+    peerStatusEl.textContent = 'Room "' + code + '" created — waiting for your friend to join…';
+    leaveBtn.style.display = 'inline-block';
+  });
 
   peer.on('error', err => {
     if(err.type === 'unavailable-id'){
-      // stored ID got taken by a stale session elsewhere — fall back to a fresh one
-      localStorage.removeItem('together-peer-id');
-      peerStatusEl.textContent = 'That ID was taken, generating a fresh one…';
-      setTimeout(initPeer, 300);
+      joinAsGuest(code);
     }else{
       peerStatusEl.textContent = 'Connection error: ' + err.type;
     }
   });
 }
 
-document.getElementById('copyBtn').onclick = () => {
-  navigator.clipboard.writeText(myIdEl.textContent);
-  const b = document.getElementById('copyBtn');
-  b.textContent = 'Copied';
-  setTimeout(()=> b.textContent = 'Copy', 1200);
+function joinAsGuest(code){
+  const guestId = roomHostId + '-' + Math.random().toString(36).slice(2, 8);
+  peer = new Peer(guestId, { config: ICE_CONFIG });
+  bindPeerHandlers();
+
+  peer.on('open', () => {
+    role = 'guest';
+    leaveBtn.style.display = 'inline-block';
+
+    if(localStream){
+      mediaConn = peer.call(roomHostId, localStream);
+      mediaConn.on('stream', remoteStream => {
+        remoteVideo.srcObject = remoteStream;
+        remoteVideo.play().catch(()=>{});
+      });
+    }
+
+    dataConn = peer.connect(roomHostId, { reliable:true });
+    dataConn.on('open', () => { setStatus(true); flushQueue(); });
+    wireData();
+  });
+
+  peer.on('error', err => {
+    peerStatusEl.textContent = 'Connection error: ' + err.type;
+  });
+}
+
+document.getElementById('joinBtn').onclick = () => {
+  const code = sanitizeRoom(roomInput.value);
+  if(!code){ alert('Type a room code first.'); return; }
+  joinRoom(code);
 };
 
-document.getElementById('newIdBtn').onclick = () => {
-  localStorage.removeItem('together-peer-id');
+leaveBtn.onclick = () => {
   if(peer) peer.destroy();
-  myIdEl.textContent = 'generating…';
+  dataConn = null; mediaConn = null; roomHostId = null; role = null;
+  remoteVideo.srcObject = null;
+  leaveBtn.style.display = 'none';
   setStatus(false);
-  initPeer();
+  peerStatusEl.textContent = 'Enter a room code — whoever types the same one lands in the same room.';
 };
 
 document.getElementById('unmuteBtn').onclick = () => {
@@ -313,25 +349,8 @@ document.getElementById('unmuteBtn').onclick = () => {
   remoteVideo.play().catch(()=>{});
 };
 
-document.getElementById('connectBtn').onclick = () => {
-  const friendId = document.getElementById('friendId').value.trim();
-  if(!friendId) return;
-
-  if(localStream){
-    mediaConn = peer.call(friendId, localStream);
-    mediaConn.on('stream', remoteStream => {
-      remoteVideo.srcObject = remoteStream;
-      remoteVideo.play().catch(()=>{});
-    });
-  }
-
-  dataConn = peer.connect(friendId, { reliable:true });
-  dataConn.on('open', () => { setStatus(true); flushQueue(); });
-  wireData();
-};
-
 function setStatus(live){
-  peerStatusEl.textContent = live ? 'Connected' : 'Waiting for connection…';
+  if(live) peerStatusEl.textContent = 'Connected';
   peerStatusEl.className = 'status' + (live ? ' live' : '');
 }
 
@@ -388,7 +407,7 @@ function onYouTubeIframeAPIReady(){
   player = new YT.Player('yt-player', {
     height: '100%',
     width: '100%',
-    playerVars: { rel:0, modestbranding:1 },
+    playerVars: { rel:0, modestbranding:1, playsinline:1, origin: window.location.origin },
     events: {
       onReady: () => {
         playerReady = true;
@@ -437,7 +456,6 @@ document.getElementById('loadBtn').onclick = () => {
   sendSync({ type:'load', videoId:id });
 };
 
-initPeer();
 </script>
 
 </body>
