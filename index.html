@@ -148,10 +148,15 @@ let player = null;          // YouTube player instance
 let ytApiReady = false;     // becomes true when YT API script loads
 let pendingVideoId = null;  // video to load once player is ready
 
-// This flag is the key to preventing infinite sync loops.
-// When true, it means "this state change was caused by a remote
-// message, not by the local user" — so we should NOT re-broadcast it.
-let isRemoteAction = false;
+// This is the key to preventing infinite sync loops.
+// A single boolean isn't enough — one seekTo()+play() call can trigger
+// MULTIPLE state-change events (e.g. buffering, then playing), so a
+// one-shot flag gets "used up" by the first event and the second one
+// slips through and re-broadcasts, causing a play/pause ping-pong loop.
+// Instead we suppress ALL outgoing broadcasts for a short time window
+// after applying a remote action.
+let suppressBroadcastUntil = 0;
+const SUPPRESS_WINDOW_MS = 1500;
 
 /* ---------- 1. Load the YouTube IFrame API dynamically ---------- */
 function loadYouTubeAPI() {
@@ -177,10 +182,10 @@ window.onYouTubeIframeAPIReady = function () {
 
 /* ---------- 2. Handle local play/pause events ---------- */
 function onPlayerStateChange(event) {
-  // If this state change was triggered BY a remote sync message,
-  // skip broadcasting — otherwise we'd create an infinite ping-pong.
-  if (isRemoteAction) {
-    isRemoteAction = false;
+  // If we're inside the suppression window (a remote sync action was just
+  // applied), skip broadcasting entirely — otherwise we'd create an
+  // infinite ping-pong between the two browsers.
+  if (Date.now() < suppressBroadcastUntil) {
     return;
   }
 
@@ -192,8 +197,24 @@ function onPlayerStateChange(event) {
 }
 
 /* ---------- 3. Send the sync message via Jitsi ---------- */
+let lastBroadcast = { action: null, time: 0, at: 0 };
+
 function broadcast(action, time) {
   if (!jitsiApi) return;
+
+  // Extra safety: if we just sent this exact same action a moment ago,
+  // don't send it again (guards against duplicate YT events firing back
+  // to back for the same user action).
+  const now = Date.now();
+  if (
+    lastBroadcast.action === action &&
+    Math.abs(lastBroadcast.time - time) < 1 &&
+    now - lastBroadcast.at < 800
+  ) {
+    return;
+  }
+  lastBroadcast = { action, time, at: now };
+
   const payload = JSON.stringify({ type: 'yt-sync', action: action, time: time });
   // Jitsi's way of sending data to everyone else in the room
   jitsiApi.executeCommand('sendEndpointTextMessage', '', payload);
@@ -220,9 +241,10 @@ function handleEndpointMessage(event) {
   if (!data || !player) return;
 
   if (data.type === 'yt-sync') {
-    // Mark the next state change as remote-triggered so it doesn't
-    // get broadcast back out (this is what stops the infinite loop).
-    isRemoteAction = true;
+    // Open the suppression window BEFORE applying the change, and keep
+    // it open for SUPPRESS_WINDOW_MS so every state-change event this
+    // triggers (buffering, playing, etc.) is ignored for broadcast.
+    suppressBroadcastUntil = Date.now() + SUPPRESS_WINDOW_MS;
 
     player.seekTo(data.time, true);
     if (data.action === 'play') {
@@ -234,7 +256,7 @@ function handleEndpointMessage(event) {
   }
 
   if (data.type === 'yt-load') {
-    isRemoteAction = true;
+    suppressBroadcastUntil = Date.now() + SUPPRESS_WINDOW_MS;
     player.loadVideoById(data.videoId);
     setStatus('Partner loaded a new video');
   }
