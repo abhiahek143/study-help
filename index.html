@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Study Sync — Watch Together</title>
+
+<!-- Daily.co iframe SDK -->
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #1e1e2f;
+    color: #f0f0f0;
+  }
+  header {
+    padding: 14px 20px;
+    background: #262640;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+  }
+  #setup {
+    max-width: 500px;
+    margin: 60px auto;
+    background: #262640;
+    padding: 24px;
+    border-radius: 10px;
+  }
+  #setup input {
+    width: 100%;
+    padding: 10px;
+    margin: 8px 0 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+  }
+  #setup button, .btn {
+    background: #5865f2;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  #setup button:hover, .btn:hover { background: #4752c4; }
+  #app { display: none; }
+  .main-layout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px;
+  }
+  #youtube-col { flex: 2; min-width: 320px; }
+  #call-col { flex: 1; min-width: 280px; }
+  #player {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: black;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #call-frame-container {
+    width: 100%;
+    height: 360px;
+    background: black;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .controls {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .controls input {
+    flex: 1;
+    min-width: 200px;
+    padding: 8px;
+    border-radius: 6px;
+    border: none;
+  }
+  #status {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #a0a0c0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📚 Study Sync</h1>
+  <div id="statusBadge" style="font-size:13px; color:#a0a0c0;"></div>
+</header>
+
+<!-- STEP 1: Setup screen — enter Daily room URL -->
+<div id="setup">
+  <h2>Join your study room</h2>
+  <p style="font-size:13px; color:#c0c0d0;">
+    Create a free room at <a href="https://dashboard.daily.co" target="_blank" style="color:#8fa8ff;">daily.co</a>
+    and paste the room URL below. Both people join with the same URL.
+  </p>
+  <label>Daily.co Room URL</label>
+  <input id="roomUrlInput" type="text" placeholder="https://yourdomain.daily.co/study-room" />
+  <label>Your Name</label>
+  <input id="nameInput" type="text" placeholder="e.g. Alex" />
+  <button id="joinBtn" class="btn">Join Room</button>
+</div>
+
+<!-- STEP 2: Main app (hidden until joined) -->
+<div id="app">
+  <div class="main-layout">
+    <div id="youtube-col">
+      <div id="player"></div>
+      <div class="controls">
+        <input id="ytUrlInput" type="text" placeholder="Paste a YouTube video URL and press Load" />
+        <button id="loadVideoBtn" class="btn">Load</button>
+      </div>
+      <div id="status">Waiting for video...</div>
+    </div>
+
+    <div id="call-col">
+      <div id="call-frame-container"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ======================================================
+   STUDY SYNC — Daily.co + YouTube IFrame API
+   Simple, beginner-friendly, single-file app
+   ====================================================== */
+
+let callFrame = null;
+let player = null;          // YouTube player instance
+let ytApiReady = false;     // becomes true when YT API script loads
+let pendingVideoId = null;  // video to load once player is ready
+
+// This flag is the key to preventing infinite sync loops.
+// When true, it means "this state change was caused by a remote
+// message, not by the local user" — so we should NOT re-broadcast it.
+let isRemoteAction = false;
+
+/* ---------- 1. Load the YouTube IFrame API dynamically ---------- */
+function loadYouTubeAPI() {
+  const tag = document.createElement('script');
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+}
+
+// Required global callback — YouTube API calls this automatically
+// once it has finished loading.
+window.onYouTubeIframeAPIReady = function () {
+  ytApiReady = true;
+  player = new YT.Player('player', {
+    height: '100%',
+    width: '100%',
+    videoId: pendingVideoId || '',
+    playerVars: { rel: 0 },
+    events: {
+      onStateChange: onPlayerStateChange
+    }
+  });
+};
+
+/* ---------- 2. Handle local play/pause events ---------- */
+function onPlayerStateChange(event) {
+  // If this state change was triggered BY a remote sync message,
+  // skip broadcasting — otherwise we'd create an infinite ping-pong.
+  if (isRemoteAction) {
+    isRemoteAction = false;
+    return;
+  }
+
+  if (event.data === YT.PlayerState.PLAYING) {
+    broadcast('play', player.getCurrentTime());
+  } else if (event.data === YT.PlayerState.PAUSED) {
+    broadcast('pause', player.getCurrentTime());
+  }
+}
+
+/* ---------- 3. Send the sync message via Daily.co ---------- */
+function broadcast(action, time) {
+  if (!callFrame) return;
+  callFrame.sendAppMessage(
+    { type: 'yt-sync', action: action, time: time },
+    '*' // send to everyone in the call
+  );
+  setStatus(`You: ${action} @ ${time.toFixed(1)}s`);
+}
+
+/* ---------- 4. Receive sync messages from the other person ---------- */
+function handleAppMessage(event) {
+  const data = event.data;
+  if (!data || data.type !== 'yt-sync' || !player) return;
+
+  // Mark the next state change as remote-triggered so it doesn't
+  // get broadcast back out (this is what stops the infinite loop).
+  isRemoteAction = true;
+
+  player.seekTo(data.time, true);
+  if (data.action === 'play') {
+    player.playVideo();
+  } else if (data.action === 'pause') {
+    player.pauseVideo();
+  }
+
+  setStatus(`Partner: ${data.action} @ ${data.time.toFixed(1)}s`);
+}
+
+/* ---------- 5. Load a video from a pasted YouTube URL ---------- */
+function extractVideoId(url) {
+  const match = url.match(/(?:v=|\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+function loadVideo(url) {
+  const id = extractVideoId(url);
+  if (!id) {
+    alert('Could not read a video ID from that URL.');
+    return;
+  }
+  if (player && ytApiReady) {
+    player.loadVideoById(id);
+    // Let the partner know a new video was loaded too, at time 0.
+    broadcast('load', 0);
+    if (callFrame) {
+      callFrame.sendAppMessage({ type: 'yt-load', videoId: id }, '*');
+    }
+  } else {
+    pendingVideoId = id;
+  }
+}
+
+/* ---------- 6. Daily.co call setup ---------- */
+async function joinCall(roomUrl, userName) {
+  callFrame = window.DailyIframe.createFrame(
+    document.getElementById('call-frame-container'),
+    {
+      showLeaveButton: true,
+      iframeStyle: {
+        width: '100%',
+        height: '100%',
+        border: '0',
+        borderRadius: '8px'
+      }
+    }
+  );
+
+  callFrame.on('app-message', handleAppMessage);
+
+  // Also sync when the partner loads a brand new video.
+  callFrame.on('app-message', (event) => {
+    const data = event.data;
+    if (data && data.type === 'yt-load' && player) {
+      isRemoteAction = true;
+      player.loadVideoById(data.videoId);
+      setStatus('Partner loaded a new video');
+    }
+  });
+
+  await callFrame.join({ url: roomUrl, userName: userName });
+  setStatus('Connected to call ✅');
+}
+
+/* ---------- UI wiring ---------- */
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+document.getElementById('joinBtn').addEventListener('click', async () => {
+  const roomUrl = document.getElementById('roomUrlInput').value.trim();
+  const name = document.getElementById('nameInput').value.trim() || 'Guest';
+
+  if (!roomUrl) {
+    alert('Please paste your Daily.co room URL.');
+    return;
+  }
+
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  loadYouTubeAPI();
+  await joinCall(roomUrl, name);
+});
+
+document.getElementById('loadVideoBtn').addEventListener('click', () => {
+  const url = document.getElementById('ytUrlInput').value.trim();
+  if (url) loadVideo(url);
+});
+</script>
+
+</body>
+</html>
