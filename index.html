@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Together — watch &amp; talk</title>
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="preconnect" href="https://www.youtube.com">
+<link rel="preconnect" href="https://www.google.com">
+<link rel="preconnect" href="https://i.ytimg.com">
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
   :root{
@@ -66,7 +70,7 @@
     border-radius:4px;
     overflow:hidden;
   }
-  #yt-player{ width:100%; height:100%; }
+  #yt-player, #yt-player iframe{ width:100%; height:100%; display:block; }
   .load-row{
     display:flex;
     gap:8px;
@@ -150,7 +154,7 @@
     overflow:hidden;
     position:relative;
   }
-  .video-tile video{width:100%;height:100%;object-fit:cover;}
+  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000;transform:translateZ(0);}
   .video-tile span{
     position:absolute;
     bottom:4px;
@@ -231,6 +235,24 @@ const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 const roomInput = document.getElementById('roomInput');
 const leaveBtn = document.getElementById('leaveBtn');
+const joinBtn = document.getElementById('joinBtn');
+const unmuteBtn = document.getElementById('unmuteBtn');
+const ytInput = document.getElementById('ytInput');
+const loadBtn = document.getElementById('loadBtn');
+const PREFERRED_YT_QUALITY = 'hd720';
+const MEDIA_CONSTRAINTS = {
+  video: {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 30, max: 30 },
+    facingMode: 'user'
+  },
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  }
+};
 
 // Public STUN + a free public TURN relay, so calls still connect across
 // mobile networks / strict NATs where plain STUN alone fails.
@@ -248,29 +270,118 @@ function sanitizeRoom(code){
 }
 
 async function ensureLocalStream(){
-  if(localStream) return;
-  try{
-    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    localVideo.srcObject = localStream;
-  }catch(e){
-    peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
+  if(localStream && localStream.active) return localStream;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    peerStatusEl.textContent = 'Camera/mic needs a secure browser context. Open this from localhost or HTTPS.';
+    return null;
   }
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS);
+  }catch(e){
+    try{
+      localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    }catch(err){
+      peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
+      return null;
+    }
+  }
+
+  tuneLocalStream(localStream);
+  localVideo.srcObject = localStream;
+  localVideo.play().catch(()=>{});
+  return localStream;
+}
+
+function tuneLocalStream(stream){
+  const videoTrack = stream.getVideoTracks()[0];
+  const audioTrack = stream.getAudioTracks()[0];
+  if(videoTrack && 'contentHint' in videoTrack) videoTrack.contentHint = 'motion';
+  if(audioTrack && 'contentHint' in audioTrack) audioTrack.contentHint = 'speech';
+}
+
+function tuneMediaConnection(conn){
+  if(!conn) return;
+
+  const applySenderLimits = () => {
+    const pc = conn.peerConnection || conn._pc;
+    if(!pc || !pc.getSenders) return;
+
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if(!sender || !sender.getParameters || !sender.setParameters) return;
+
+    const params = sender.getParameters();
+    if(!params.encodings || !params.encodings.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = 1800000;
+    params.encodings[0].maxFramerate = 30;
+    sender.setParameters(params).catch(()=>{});
+  };
+
+  applySenderLimits();
+  setTimeout(applySenderLimits, 800);
+}
+
+function attachRemoteStream(remoteStream){
+  remoteVideo.srcObject = remoteStream;
+  remoteVideo.play().catch(()=>{});
+}
+
+function cleanupRoom(options = {}){
+  const stopLocal = !!options.stopLocal;
+  const resetStatus = options.resetStatus !== false;
+
+  if(dataConn){ try{ dataConn.close(); }catch(e){} }
+  if(mediaConn){ try{ mediaConn.close(); }catch(e){} }
+  if(peer){ try{ peer.destroy(); }catch(e){} }
+
+  dataConn = null;
+  mediaConn = null;
+  peer = null;
+  roomHostId = null;
+  role = null;
+  remoteVideo.srcObject = null;
+  remoteVideo.muted = true;
+  unmuteBtn.textContent = 'Unmute friend';
+  leaveBtn.style.display = 'none';
+
+  if(stopLocal && localStream){
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+    localVideo.srcObject = localStream;
+  }
+
+  if(resetStatus) setStatus(false);
 }
 
 function bindPeerHandlers(){
-  peer.on('call', call => {
-    call.answer(localStream);
+  const activePeer = peer;
+
+  activePeer.on('call', async call => {
+    if(peer !== activePeer) return;
+    const stream = await ensureLocalStream();
+    if(peer !== activePeer) return;
+    call.answer(stream || undefined);
     call.on('stream', remoteStream => {
-      remoteVideo.srcObject = remoteStream;
-      remoteVideo.play().catch(()=>{});
+      attachRemoteStream(remoteStream);
+    });
+    call.on('close', () => {
+      if(mediaConn === call) remoteVideo.srcObject = null;
     });
     mediaConn = call;
+    tuneMediaConnection(call);
   });
 
-  peer.on('connection', conn => {
+  activePeer.on('connection', conn => {
+    if(peer !== activePeer) return;
     dataConn = conn;
     dataConn.on('open', () => { setStatus(true); flushQueue(); });
-    wireData();
+    wireData(conn);
+  });
+
+  activePeer.on('disconnected', () => {
+    if(peer === activePeer) setStatus(false, 'Disconnected — trying to reconnect…');
+  });
+  activePeer.on('close', () => {
+    if(peer === activePeer) setStatus(false);
   });
 }
 
@@ -279,6 +390,7 @@ function bindPeerHandlers(){
 // already taken, so they connect to it as a guest instead — no manual ID
 // copy-pasting needed on either side.
 async function joinRoom(code){
+  if(peer) cleanupRoom({ stopLocal:false, resetStatus:false });
   await ensureLocalStream();
   roomHostId = 'room-' + code;
   peerStatusEl.textContent = 'Joining "' + code + '"…';
@@ -294,33 +406,42 @@ async function joinRoom(code){
 
   peer.on('error', err => {
     if(err.type === 'unavailable-id'){
-      joinAsGuest(code);
+      joinAsGuest(code, roomHostId);
     }else{
       peerStatusEl.textContent = 'Connection error: ' + err.type;
     }
   });
 }
 
-function joinAsGuest(code){
-  const guestId = roomHostId + '-' + Math.random().toString(36).slice(2, 8);
+function joinAsGuest(code, hostId){
+  const oldPeer = peer;
+  if(oldPeer){ try{ oldPeer.destroy(); }catch(e){} }
+  roomHostId = hostId;
+
+  const guestId = hostId + '-' + Math.random().toString(36).slice(2, 8);
   peer = new Peer(guestId, { config: ICE_CONFIG });
   bindPeerHandlers();
+  peerStatusEl.textContent = 'Room "' + code + '" found — connecting…';
 
   peer.on('open', () => {
     role = 'guest';
     leaveBtn.style.display = 'inline-block';
 
     if(localStream){
-      mediaConn = peer.call(roomHostId, localStream);
-      mediaConn.on('stream', remoteStream => {
-        remoteVideo.srcObject = remoteStream;
-        remoteVideo.play().catch(()=>{});
+      const call = peer.call(roomHostId, localStream);
+      mediaConn = call;
+      call.on('stream', remoteStream => {
+        attachRemoteStream(remoteStream);
       });
+      call.on('close', () => {
+        if(mediaConn === call) remoteVideo.srcObject = null;
+      });
+      tuneMediaConnection(call);
     }
 
     dataConn = peer.connect(roomHostId, { reliable:true });
     dataConn.on('open', () => { setStatus(true); flushQueue(); });
-    wireData();
+    wireData(dataConn);
   });
 
   peer.on('error', err => {
@@ -328,29 +449,25 @@ function joinAsGuest(code){
   });
 }
 
-document.getElementById('joinBtn').onclick = () => {
+joinBtn.onclick = () => {
   const code = sanitizeRoom(roomInput.value);
   if(!code){ alert('Type a room code first.'); return; }
   joinRoom(code);
 };
 
 leaveBtn.onclick = () => {
-  if(peer) peer.destroy();
-  dataConn = null; mediaConn = null; roomHostId = null; role = null;
-  remoteVideo.srcObject = null;
-  leaveBtn.style.display = 'none';
-  setStatus(false);
+  cleanupRoom({ stopLocal:true });
   peerStatusEl.textContent = 'Enter a room code — whoever types the same one lands in the same room.';
 };
 
-document.getElementById('unmuteBtn').onclick = () => {
+unmuteBtn.onclick = () => {
   remoteVideo.muted = !remoteVideo.muted;
-  document.getElementById('unmuteBtn').textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
+  unmuteBtn.textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
   remoteVideo.play().catch(()=>{});
 };
 
-function setStatus(live){
-  if(live) peerStatusEl.textContent = 'Connected';
+function setStatus(live, message){
+  peerStatusEl.textContent = message || (live ? 'Connected' : 'Disconnected');
   peerStatusEl.className = 'status' + (live ? ' live' : '');
 }
 
@@ -358,19 +475,31 @@ function setStatus(live){
 let applyingRemote = false; // guards against echoing our own sync back out
 let outQueue = [];   // messages waiting for the data channel to open
 let inQueue = [];    // incoming messages that arrived before the player was ready
+let remoteApplyTimer;
+let playbackMonitorId;
+let lastMonitorAt = 0;
+const wiredDataConnections = new WeakSet();
 
-function wireData(){
-  dataConn.on('data', msg => {
+function wireData(conn = dataConn){
+  if(!conn || wiredDataConnections.has(conn)) return;
+  wiredDataConnections.add(conn);
+
+  conn.on('data', msg => {
     if(!player || !playerReady){ inQueue.push(msg); return; }
     applyIncoming(msg);
   });
-  dataConn.on('close', () => setStatus(false));
+  conn.on('close', () => {
+    if(dataConn === conn) setStatus(false);
+  });
 }
 
 function applyIncoming(msg){
+  if(!msg || !msg.type) return;
   applyingRemote = true;
+  clearTimeout(remoteApplyTimer);
+
   if(msg.type === 'load'){
-    player.loadVideoById(msg.videoId);
+    loadYouTubeVideo(msg.videoId, msg.time || 0);
   } else if(msg.type === 'play'){
     player.seekTo(msg.time, true);
     player.playVideo();
@@ -380,7 +509,9 @@ function applyIncoming(msg){
   } else if(msg.type === 'seek'){
     player.seekTo(msg.time, true);
   }
-  setTimeout(()=> applyingRemote = false, 400);
+
+  if(typeof msg.time === 'number') lastKnownTime = msg.time;
+  remoteApplyTimer = setTimeout(()=> applyingRemote = false, 600);
 }
 
 function flushQueue(){
@@ -389,12 +520,22 @@ function flushQueue(){
   }
 }
 
+function queueSync(payload){
+  if(payload.type === 'load'){
+    outQueue = [];
+  } else if(payload.type === 'play' || payload.type === 'pause' || payload.type === 'seek'){
+    outQueue = outQueue.filter(msg => msg.type === 'load');
+  }
+  outQueue.push(payload);
+  if(outQueue.length > 6) outQueue = outQueue.slice(-6);
+}
+
 function sendSync(payload){
   if(applyingRemote) return;
   if(dataConn && dataConn.open){
     dataConn.send(payload);
   }else{
-    outQueue.push(payload); // sent as soon as the connection opens
+    queueSync(payload); // sent as soon as the connection opens
   }
 }
 
@@ -403,14 +544,24 @@ let player;
 let playerReady = false;
 let lastKnownTime = 0;
 
+function buildPlayerVars(){
+  const vars = { rel:0, modestbranding:1, playsinline:1, iv_load_policy:3, enablejsapi:1 };
+  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
+    vars.origin = window.location.origin;
+  }
+  return vars;
+}
+
 function onYouTubeIframeAPIReady(){
   player = new YT.Player('yt-player', {
     height: '100%',
     width: '100%',
-    playerVars: { rel:0, modestbranding:1, playsinline:1, origin: window.location.origin },
+    playerVars: buildPlayerVars(),
     events: {
       onReady: () => {
         playerReady = true;
+        preferPlaybackQuality();
+        startPlaybackMonitor();
         while(inQueue.length) applyIncoming(inQueue.shift());
       },
       onStateChange: onPlayerStateChange
@@ -421,38 +572,95 @@ const ytTag = document.createElement('script');
 ytTag.src = "https://www.youtube.com/iframe_api";
 document.head.appendChild(ytTag);
 
+function preferPlaybackQuality(){
+  if(!player || !player.setPlaybackQuality) return;
+  try{ player.setPlaybackQuality(PREFERRED_YT_QUALITY); }catch(e){}
+}
+
+function loadYouTubeVideo(videoId, startSeconds = 0){
+  const request = { videoId, suggestedQuality: PREFERRED_YT_QUALITY };
+  if(startSeconds > 0) request.startSeconds = startSeconds;
+  player.loadVideoById(request);
+  preferPlaybackQuality();
+}
+
 function onPlayerStateChange(e){
   if(applyingRemote) return;
   const time = player.getCurrentTime();
   if(e.data === YT.PlayerState.PLAYING){
+    preferPlaybackQuality();
     sendSync({ type:'play', time });
   } else if(e.data === YT.PlayerState.PAUSED){
     sendSync({ type:'pause', time });
   }
   lastKnownTime = time;
+  lastMonitorAt = performance.now();
+}
+
+function startPlaybackMonitor(){
+  if(playbackMonitorId) return;
+  playbackMonitorId = setInterval(() => {
+    if(!player || !playerReady || applyingRemote) return;
+
+    const state = player.getPlayerState();
+    const time = player.getCurrentTime();
+    const now = performance.now();
+    const elapsed = lastMonitorAt ? (now - lastMonitorAt) / 1000 : 0;
+    const actualDelta = time - lastKnownTime;
+    const expectedDelta = state === YT.PlayerState.PLAYING ? elapsed : 0;
+    const jumped = state === YT.PlayerState.PLAYING
+      ? Math.abs(actualDelta - expectedDelta) > 1.5
+      : Math.abs(actualDelta) > 0.75;
+
+    if(jumped && dataConn && dataConn.open){
+      sendSync({ type:'seek', time });
+    }
+
+    lastKnownTime = time;
+    lastMonitorAt = now;
+  }, 1000);
+}
+
+function cleanVideoId(id){
+  return /^[\w-]{11}$/.test(id || '') ? id : null;
+}
+
+function isExpectedYouTubeHost(host, root){
+  return host === root || host.endsWith('.' + root);
 }
 
 function extractVideoId(input){
-  input = input.trim();
-  const patterns = [
-    /(?:youtu\.be\/)([\w-]{11})/,
-    /(?:youtube\.com\/watch\?v=)([\w-]{11})/,
-    /(?:youtube\.com\/embed\/)([\w-]{11})/
-  ];
-  for(const p of patterns){
-    const m = input.match(p);
-    if(m) return m[1];
+  const value = input.trim();
+  if(cleanVideoId(value)) return value;
+
+  try{
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '');
+    const parts = url.pathname.split('/').filter(Boolean);
+
+    if(host === 'youtu.be') return cleanVideoId(parts[0]);
+    if(isExpectedYouTubeHost(host, 'youtube.com') || isExpectedYouTubeHost(host, 'youtube-nocookie.com')){
+      const queryId = cleanVideoId(url.searchParams.get('v'));
+      if(queryId) return queryId;
+
+      if(parts[0] === 'embed' || parts[0] === 'shorts' || parts[0] === 'live'){
+        return cleanVideoId(parts[1]);
+      }
+    }
+  }catch(e){
+    const match = value.match(/(?:v=|\/)([\w-]{11})(?:[?&#/]|$)/);
+    if(match) return cleanVideoId(match[1]);
   }
-  if(/^[\w-]{11}$/.test(input)) return input;
+
   return null;
 }
 
-document.getElementById('loadBtn').onclick = () => {
-  const raw = document.getElementById('ytInput').value;
+loadBtn.onclick = () => {
+  const raw = ytInput.value;
   const id = extractVideoId(raw);
   if(!id){ alert('Could not read a video ID from that link.'); return; }
   if(!player || !playerReady){ alert('Player is still loading, try again in a second.'); return; }
-  player.loadVideoById(id);
+  loadYouTubeVideo(id);
   sendSync({ type:'load', videoId:id });
 };
 
