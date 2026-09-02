@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Study Sync — Watch Together</title>
 
-<!-- Jitsi Meet External API (free, no signup, no card) -->
-<script src="https://meet.jit.si/external_api.js"></script>
+<!-- PeerJS: free WebRTC signaling (uses PeerJS's free public cloud broker).
+     Actual video/audio goes directly browser-to-browser (P2P) once
+     connected — no call-time limit, no minutes cap. -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <style>
   * { box-sizing: border-box; }
@@ -73,9 +75,38 @@
   #call-frame-container {
     width: 100%;
     height: 360px;
-    background: black;
+    background: #000;
     border-radius: 8px;
     overflow: hidden;
+    position: relative;
+  }
+  #remoteVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #localVideo {
+    position: absolute;
+    width: 100px;
+    height: 75px;
+    right: 10px;
+    top: 10px;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 2px solid #5865f2;
+    background: #111;
+  }
+  #callPlaceholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: #a0a0c0;
+    text-align: center;
+    padding: 20px;
   }
   .controls {
     margin-top: 12px;
@@ -132,26 +163,27 @@
     </div>
 
     <div id="call-col">
-      <div id="call-frame-container"></div>
+      <div id="call-frame-container">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay playsinline muted></video>
+        <div id="callPlaceholder">Waiting for your partner to join the room…</div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
 /* ======================================================
-   STUDY SYNC — Jitsi Meet + YouTube IFrame API
-   Free, no signup, no card, single-file app
+   STUDY SYNC — WebRTC (PeerJS) + YouTube IFrame API
+   Free, no signup, no card, no call-time limit.
+   Video/audio go directly browser-to-browser (P2P) once
+   connected — PeerJS's free public server is only used to
+   help the two browsers find each other (signaling).
    ====================================================== */
 
-/* ---------- 0. Jitsi server config ----------
-   Using the free public meet.jit.si server by default — no signup needed.
-   If you self-host Jitsi (e.g. on a DigitalOcean/AWS/Linode VPS with
-   Docker Compose + Let's Encrypt SSL), just change this one line to your
-   own domain, e.g. "meet.myapp.com". Everything else in this file will
-   automatically use it. */
-const JITSI_DOMAIN = "meet.jit.si";
-
-let jitsiApi = null;
+let peer = null;
+let localStream = null;
+let dataConn = null;      // WebRTC data channel, used for YT sync messages
 let player = null;          // YouTube player instance
 let ytApiReady = false;     // becomes true when YT API script loads
 let pendingVideoId = null;  // video to load once player is ready
@@ -204,11 +236,11 @@ function onPlayerStateChange(event) {
   }
 }
 
-/* ---------- 3. Send the sync message via Jitsi ---------- */
+/* ---------- 3. Send the sync message via the WebRTC data channel ---------- */
 let lastBroadcast = { action: null, time: 0, at: 0 };
 
 function broadcast(action, time) {
-  if (!jitsiApi) return;
+  if (!dataConn || !dataConn.open) return;
 
   // Extra safety: if we just sent this exact same action a moment ago,
   // don't send it again (guards against duplicate YT events firing back
@@ -223,29 +255,17 @@ function broadcast(action, time) {
   }
   lastBroadcast = { action, time, at: now };
 
-  const payload = JSON.stringify({ type: 'yt-sync', action: action, time: time });
-  // Jitsi's way of sending data to everyone else in the room
-  jitsiApi.executeCommand('sendEndpointTextMessage', '', payload);
+  dataConn.send({ type: 'yt-sync', action: action, time: time });
   setStatus(`You: ${action} @ ${time.toFixed(1)}s`);
 }
 
 function broadcastLoad(videoId) {
-  if (!jitsiApi) return;
-  const payload = JSON.stringify({ type: 'yt-load', videoId: videoId });
-  jitsiApi.executeCommand('sendEndpointTextMessage', '', payload);
+  if (!dataConn || !dataConn.open) return;
+  dataConn.send({ type: 'yt-load', videoId: videoId });
 }
 
 /* ---------- 4. Receive sync messages from the other person ---------- */
-function handleEndpointMessage(event) {
-  let data;
-  try {
-    // Jitsi wraps the message text inside event.data.eventData.text
-    const raw = event?.data?.eventData?.text;
-    data = JSON.parse(raw);
-  } catch (e) {
-    return; // ignore anything that isn't our JSON payload
-  }
-
+function handleMessage(data) {
   if (!data || !player) return;
 
   if (data.type === 'yt-sync') {
@@ -290,28 +310,80 @@ function loadVideo(url) {
   }
 }
 
-/* ---------- 6. Jitsi Meet call setup ---------- */
+/* ---------- 6. WebRTC call setup (PeerJS) ----------
+   Two-person room pattern: the room name maps to a fixed "host" peer ID.
+   Whoever opens the room first claims that ID and waits. The second
+   person's ID is already taken, so they fall back to a random ID and
+   call + data-connect to the host ID instead. This needs no backend of
+   our own — PeerJS's free cloud signaling server just helps the two
+   browsers exchange connection info; the media stream itself is
+   peer-to-peer, so there's no time limit and no minutes cap. */
 function joinCall(roomName, userName) {
-  const domain = JITSI_DOMAIN;
-  const options = {
-    roomName: "studysync-" + roomName.replace(/\s+/g, '-'),
-    parentNode: document.getElementById('call-frame-container'),
-    userInfo: { displayName: userName },
-    width: '100%',
-    height: '100%',
-    configOverwrite: {
-      startWithAudioMuted: false,
-      startWithVideoMuted: false
-    }
-  };
+  const hostId = 'studysync-' + roomName.trim().toLowerCase().replace(/\s+/g, '-');
 
-  jitsiApi = new JitsiMeetExternalAPI(domain, options);
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
+      localStream = stream;
+      document.getElementById('localVideo').srcObject = stream;
+      startPeer(hostId);
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Camera/microphone access is needed for the video call. Please allow permissions and try again.');
+    });
+}
 
-  jitsiApi.addEventListener('endpointTextMessageReceived', handleEndpointMessage);
+function startPeer(hostId) {
+  peer = new Peer(hostId);
 
-  jitsiApi.addEventListener('videoConferenceJoined', () => {
-    setStatus('Connected to call ✅');
+  peer.on('open', () => {
+    // We successfully claimed the host ID — we're first in the room.
+    setStatus('Waiting for your partner to join…');
   });
+
+  // Someone calls us with their video/audio.
+  peer.on('call', call => {
+    call.answer(localStream);
+    call.on('stream', remoteStream => onRemoteStream(remoteStream));
+  });
+
+  // Someone opens a data channel to us (for YT sync messages).
+  peer.on('connection', conn => {
+    dataConn = conn;
+    dataConn.on('open', () => setStatus('Connected to call ✅'));
+    dataConn.on('data', data => handleMessage(data));
+  });
+
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      // The host ID is already taken — someone's already in the room.
+      // Become the "guest": get a random ID, then call + connect to host.
+      becomeGuest(hostId);
+    } else {
+      console.error('PeerJS error:', err);
+    }
+  });
+}
+
+function becomeGuest(hostId) {
+  peer = new Peer();
+
+  peer.on('open', () => {
+    const call = peer.call(hostId, localStream);
+    call.on('stream', remoteStream => onRemoteStream(remoteStream));
+
+    dataConn = peer.connect(hostId);
+    dataConn.on('open', () => setStatus('Connected to call ✅'));
+    dataConn.on('data', data => handleMessage(data));
+  });
+
+  peer.on('error', err => console.error('PeerJS error:', err));
+}
+
+function onRemoteStream(remoteStream) {
+  document.getElementById('remoteVideo').srcObject = remoteStream;
+  document.getElementById('callPlaceholder').style.display = 'none';
+  setStatus('Connected to call ✅');
 }
 
 /* ---------- UI wiring ---------- */
