@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Study Sync — Watch Together</title>
 
-<!-- Daily.co iframe SDK -->
-<script src="https://unpkg.com/@daily-co/daily-js"></script>
+<!-- Jitsi Meet External API (free, no signup, no card) -->
+<script src="https://meet.jit.si/external_api.js"></script>
 
 <style>
   * { box-sizing: border-box; }
@@ -105,15 +105,15 @@
   <div id="statusBadge" style="font-size:13px; color:#a0a0c0;"></div>
 </header>
 
-<!-- STEP 1: Setup screen — enter Daily room URL -->
+<!-- STEP 1: Setup screen — enter a room name -->
 <div id="setup">
   <h2>Join your study room</h2>
   <p style="font-size:13px; color:#c0c0d0;">
-    Create a free room at <a href="https://dashboard.daily.co" target="_blank" style="color:#8fa8ff;">daily.co</a>
-    and paste the room URL below. Both people join with the same URL.
+    No account needed. Just pick a room name — anything works, as long as
+    both of you type the exact same name. Think of it like a shared password.
   </p>
-  <label>Daily.co Room URL</label>
-  <input id="roomUrlInput" type="text" placeholder="https://yourdomain.daily.co/study-room" />
+  <label>Room Name</label>
+  <input id="roomUrlInput" type="text" placeholder="e.g. abhi-study-room-42" />
   <label>Your Name</label>
   <input id="nameInput" type="text" placeholder="e.g. Alex" />
   <button id="joinBtn" class="btn">Join Room</button>
@@ -139,11 +139,11 @@
 
 <script>
 /* ======================================================
-   STUDY SYNC — Daily.co + YouTube IFrame API
-   Simple, beginner-friendly, single-file app
+   STUDY SYNC — Jitsi Meet + YouTube IFrame API
+   Free, no signup, no card, single-file app
    ====================================================== */
 
-let callFrame = null;
+let jitsiApi = null;
 let player = null;          // YouTube player instance
 let ytApiReady = false;     // becomes true when YT API script loads
 let pendingVideoId = null;  // video to load once player is ready
@@ -191,33 +191,53 @@ function onPlayerStateChange(event) {
   }
 }
 
-/* ---------- 3. Send the sync message via Daily.co ---------- */
+/* ---------- 3. Send the sync message via Jitsi ---------- */
 function broadcast(action, time) {
-  if (!callFrame) return;
-  callFrame.sendAppMessage(
-    { type: 'yt-sync', action: action, time: time },
-    '*' // send to everyone in the call
-  );
+  if (!jitsiApi) return;
+  const payload = JSON.stringify({ type: 'yt-sync', action: action, time: time });
+  // Jitsi's way of sending data to everyone else in the room
+  jitsiApi.executeCommand('sendEndpointTextMessage', '', payload);
   setStatus(`You: ${action} @ ${time.toFixed(1)}s`);
 }
 
+function broadcastLoad(videoId) {
+  if (!jitsiApi) return;
+  const payload = JSON.stringify({ type: 'yt-load', videoId: videoId });
+  jitsiApi.executeCommand('sendEndpointTextMessage', '', payload);
+}
+
 /* ---------- 4. Receive sync messages from the other person ---------- */
-function handleAppMessage(event) {
-  const data = event.data;
-  if (!data || data.type !== 'yt-sync' || !player) return;
-
-  // Mark the next state change as remote-triggered so it doesn't
-  // get broadcast back out (this is what stops the infinite loop).
-  isRemoteAction = true;
-
-  player.seekTo(data.time, true);
-  if (data.action === 'play') {
-    player.playVideo();
-  } else if (data.action === 'pause') {
-    player.pauseVideo();
+function handleEndpointMessage(event) {
+  let data;
+  try {
+    // Jitsi wraps the message text inside event.data.eventData.text
+    const raw = event?.data?.eventData?.text;
+    data = JSON.parse(raw);
+  } catch (e) {
+    return; // ignore anything that isn't our JSON payload
   }
 
-  setStatus(`Partner: ${data.action} @ ${data.time.toFixed(1)}s`);
+  if (!data || !player) return;
+
+  if (data.type === 'yt-sync') {
+    // Mark the next state change as remote-triggered so it doesn't
+    // get broadcast back out (this is what stops the infinite loop).
+    isRemoteAction = true;
+
+    player.seekTo(data.time, true);
+    if (data.action === 'play') {
+      player.playVideo();
+    } else if (data.action === 'pause') {
+      player.pauseVideo();
+    }
+    setStatus(`Partner: ${data.action} @ ${data.time.toFixed(1)}s`);
+  }
+
+  if (data.type === 'yt-load') {
+    isRemoteAction = true;
+    player.loadVideoById(data.videoId);
+    setStatus('Partner loaded a new video');
+  }
 }
 
 /* ---------- 5. Load a video from a pasted YouTube URL ---------- */
@@ -234,45 +254,34 @@ function loadVideo(url) {
   }
   if (player && ytApiReady) {
     player.loadVideoById(id);
-    // Let the partner know a new video was loaded too, at time 0.
-    broadcast('load', 0);
-    if (callFrame) {
-      callFrame.sendAppMessage({ type: 'yt-load', videoId: id }, '*');
-    }
+    broadcastLoad(id);
   } else {
     pendingVideoId = id;
   }
 }
 
-/* ---------- 6. Daily.co call setup ---------- */
-async function joinCall(roomUrl, userName) {
-  callFrame = window.DailyIframe.createFrame(
-    document.getElementById('call-frame-container'),
-    {
-      showLeaveButton: true,
-      iframeStyle: {
-        width: '100%',
-        height: '100%',
-        border: '0',
-        borderRadius: '8px'
-      }
+/* ---------- 6. Jitsi Meet call setup ---------- */
+function joinCall(roomName, userName) {
+  const domain = "meet.jit.si";
+  const options = {
+    roomName: "studysync-" + roomName.replace(/\s+/g, '-'),
+    parentNode: document.getElementById('call-frame-container'),
+    userInfo: { displayName: userName },
+    width: '100%',
+    height: '100%',
+    configOverwrite: {
+      startWithAudioMuted: false,
+      startWithVideoMuted: false
     }
-  );
+  };
 
-  callFrame.on('app-message', handleAppMessage);
+  jitsiApi = new JitsiMeetExternalAPI(domain, options);
 
-  // Also sync when the partner loads a brand new video.
-  callFrame.on('app-message', (event) => {
-    const data = event.data;
-    if (data && data.type === 'yt-load' && player) {
-      isRemoteAction = true;
-      player.loadVideoById(data.videoId);
-      setStatus('Partner loaded a new video');
-    }
+  jitsiApi.addEventListener('endpointTextMessageReceived', handleEndpointMessage);
+
+  jitsiApi.addEventListener('videoConferenceJoined', () => {
+    setStatus('Connected to call ✅');
   });
-
-  await callFrame.join({ url: roomUrl, userName: userName });
-  setStatus('Connected to call ✅');
 }
 
 /* ---------- UI wiring ---------- */
@@ -280,12 +289,12 @@ function setStatus(msg) {
   document.getElementById('status').textContent = msg;
 }
 
-document.getElementById('joinBtn').addEventListener('click', async () => {
-  const roomUrl = document.getElementById('roomUrlInput').value.trim();
+document.getElementById('joinBtn').addEventListener('click', () => {
+  const roomName = document.getElementById('roomUrlInput').value.trim();
   const name = document.getElementById('nameInput').value.trim() || 'Guest';
 
-  if (!roomUrl) {
-    alert('Please paste your Daily.co room URL.');
+  if (!roomName) {
+    alert('Please enter a room name.');
     return;
   }
 
@@ -293,7 +302,7 @@ document.getElementById('joinBtn').addEventListener('click', async () => {
   document.getElementById('app').style.display = 'block';
 
   loadYouTubeAPI();
-  await joinCall(roomUrl, name);
+  joinCall(roomName, name);
 });
 
 document.getElementById('loadVideoBtn').addEventListener('click', () => {
