@@ -143,6 +143,14 @@
    Free, no signup, no card, single-file app
    ====================================================== */
 
+/* ---------- 0. Jitsi server config ----------
+   Using the free public meet.jit.si server by default — no signup needed.
+   If you self-host Jitsi (e.g. on a DigitalOcean/AWS/Linode VPS with
+   Docker Compose + Let's Encrypt SSL), just change this one line to your
+   own domain, e.g. "meet.myapp.com". Everything else in this file will
+   automatically use it. */
+const JITSI_DOMAIN = "meet.jit.si";
+
 let jitsiApi = null;
 let player = null;          // YouTube player instance
 let ytApiReady = false;     // becomes true when YT API script loads
@@ -284,7 +292,7 @@ function loadVideo(url) {
 
 /* ---------- 6. Jitsi Meet call setup ---------- */
 function joinCall(roomName, userName) {
-  const domain = "meet.jit.si";
+  const domain = JITSI_DOMAIN;
   const options = {
     roomName: "studysync-" + roomName.replace(/\s+/g, '-'),
     parentNode: document.getElementById('call-frame-container'),
