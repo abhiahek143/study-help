@@ -201,6 +201,7 @@
         <code id="myId">generating…</code>
         <button class="secondary" id="copyBtn">Copy</button>
       </div>
+      <button class="secondary" id="newIdBtn" style="align-self:flex-start;">Generate new ID</button>
       <div class="status" id="peerStatus">Waiting for connection…</div>
     </div>
 
@@ -220,10 +221,11 @@
           <span>You</span>
         </div>
         <div class="video-tile">
-          <video id="remoteVideo" autoplay playsinline></video>
+          <video id="remoteVideo" autoplay playsinline muted></video>
           <span>Friend</span>
         </div>
       </div>
+      <button class="secondary" id="unmuteBtn" style="align-self:flex-start;">Unmute friend</button>
     </div>
 
   </div>
@@ -237,6 +239,15 @@ const peerStatusEl = document.getElementById('peerStatus');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 
+/* Keep the same Peer ID across visits (stored in this browser) instead of
+   a fresh random one every reload. "Generate new ID" clears it on demand. */
+function getStoredId(){
+  return localStorage.getItem('together-peer-id');
+}
+function makeShortId(){
+  return 'twg-' + Math.random().toString(36).slice(2, 8);
+}
+
 async function initPeer(){
   try{
     localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
@@ -245,25 +256,39 @@ async function initPeer(){
     peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
   }
 
-  peer = new Peer(); // uses PeerJS free public broker, no server needed
+  let myId = getStoredId() || makeShortId();
+  peer = new Peer(myId); // uses PeerJS free public broker, no server needed
 
-  peer.on('open', id => { myIdEl.textContent = id; });
+  peer.on('open', id => {
+    myIdEl.textContent = id;
+    localStorage.setItem('together-peer-id', id);
+  });
 
   peer.on('call', call => {
     call.answer(localStream);
-    call.on('stream', remoteStream => { remoteVideo.srcObject = remoteStream; });
+    call.on('stream', remoteStream => {
+      remoteVideo.srcObject = remoteStream;
+      remoteVideo.play().catch(()=>{});
+    });
     mediaConn = call;
     setStatus(true);
   });
 
   peer.on('connection', conn => {
     dataConn = conn;
+    dataConn.on('open', () => { setStatus(true); flushQueue(); });
     wireData();
-    setStatus(true);
   });
 
   peer.on('error', err => {
-    peerStatusEl.textContent = 'Connection error: ' + err.type;
+    if(err.type === 'unavailable-id'){
+      // stored ID got taken by a stale session elsewhere — fall back to a fresh one
+      localStorage.removeItem('together-peer-id');
+      peerStatusEl.textContent = 'That ID was taken, generating a fresh one…';
+      setTimeout(initPeer, 300);
+    }else{
+      peerStatusEl.textContent = 'Connection error: ' + err.type;
+    }
   });
 }
 
@@ -274,17 +299,34 @@ document.getElementById('copyBtn').onclick = () => {
   setTimeout(()=> b.textContent = 'Copy', 1200);
 };
 
+document.getElementById('newIdBtn').onclick = () => {
+  localStorage.removeItem('together-peer-id');
+  if(peer) peer.destroy();
+  myIdEl.textContent = 'generating…';
+  setStatus(false);
+  initPeer();
+};
+
+document.getElementById('unmuteBtn').onclick = () => {
+  remoteVideo.muted = !remoteVideo.muted;
+  document.getElementById('unmuteBtn').textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
+  remoteVideo.play().catch(()=>{});
+};
+
 document.getElementById('connectBtn').onclick = () => {
   const friendId = document.getElementById('friendId').value.trim();
   if(!friendId) return;
 
   if(localStream){
     mediaConn = peer.call(friendId, localStream);
-    mediaConn.on('stream', remoteStream => { remoteVideo.srcObject = remoteStream; });
+    mediaConn.on('stream', remoteStream => {
+      remoteVideo.srcObject = remoteStream;
+      remoteVideo.play().catch(()=>{});
+    });
   }
 
-  dataConn = peer.connect(friendId);
-  dataConn.on('open', () => setStatus(true));
+  dataConn = peer.connect(friendId, { reliable:true });
+  dataConn.on('open', () => { setStatus(true); flushQueue(); });
   wireData();
 };
 
@@ -295,33 +337,51 @@ function setStatus(live){
 
 /* ---------- Data channel: sync YouTube playback ---------- */
 let applyingRemote = false; // guards against echoing our own sync back out
+let outQueue = [];   // messages waiting for the data channel to open
+let inQueue = [];    // incoming messages that arrived before the player was ready
 
 function wireData(){
   dataConn.on('data', msg => {
-    applyingRemote = true;
-    if(msg.type === 'load'){
-      player.loadVideoById(msg.videoId);
-    } else if(msg.type === 'play'){
-      player.seekTo(msg.time, true);
-      player.playVideo();
-    } else if(msg.type === 'pause'){
-      player.seekTo(msg.time, true);
-      player.pauseVideo();
-    } else if(msg.type === 'seek'){
-      player.seekTo(msg.time, true);
-    }
-    setTimeout(()=> applyingRemote = false, 400);
+    if(!player || !playerReady){ inQueue.push(msg); return; }
+    applyIncoming(msg);
   });
+  dataConn.on('close', () => setStatus(false));
+}
+
+function applyIncoming(msg){
+  applyingRemote = true;
+  if(msg.type === 'load'){
+    player.loadVideoById(msg.videoId);
+  } else if(msg.type === 'play'){
+    player.seekTo(msg.time, true);
+    player.playVideo();
+  } else if(msg.type === 'pause'){
+    player.seekTo(msg.time, true);
+    player.pauseVideo();
+  } else if(msg.type === 'seek'){
+    player.seekTo(msg.time, true);
+  }
+  setTimeout(()=> applyingRemote = false, 400);
+}
+
+function flushQueue(){
+  if(dataConn && dataConn.open){
+    while(outQueue.length) dataConn.send(outQueue.shift());
+  }
 }
 
 function sendSync(payload){
-  if(dataConn && dataConn.open && !applyingRemote){
+  if(applyingRemote) return;
+  if(dataConn && dataConn.open){
     dataConn.send(payload);
+  }else{
+    outQueue.push(payload); // sent as soon as the connection opens
   }
 }
 
 /* ---------- YouTube IFrame player ---------- */
 let player;
+let playerReady = false;
 let lastKnownTime = 0;
 
 function onYouTubeIframeAPIReady(){
@@ -330,6 +390,10 @@ function onYouTubeIframeAPIReady(){
     width: '100%',
     playerVars: { rel:0, modestbranding:1 },
     events: {
+      onReady: () => {
+        playerReady = true;
+        while(inQueue.length) applyIncoming(inQueue.shift());
+      },
       onStateChange: onPlayerStateChange
     }
   });
@@ -368,6 +432,7 @@ document.getElementById('loadBtn').onclick = () => {
   const raw = document.getElementById('ytInput').value;
   const id = extractVideoId(raw);
   if(!id){ alert('Could not read a video ID from that link.'); return; }
+  if(!player || !playerReady){ alert('Player is still loading, try again in a second.'); return; }
   player.loadVideoById(id);
   sendSync({ type:'load', videoId:id });
 };
