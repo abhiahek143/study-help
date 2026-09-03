@@ -176,6 +176,12 @@
     font-family:monospace;
     font-size:13px;
   }
+  .call-timer{
+    align-self:flex-start;
+    color:var(--muted);
+    font-family:monospace;
+    font-size:13px;
+  }
 </style>
 </head>
 <body>
@@ -222,6 +228,7 @@
         </div>
       </div>
       <button class="secondary" id="unmuteBtn" style="align-self:flex-start;">Unmute friend</button>
+      <div class="call-timer" id="callTimer">00:00</div>
     </div>
 
   </div>
@@ -237,6 +244,7 @@ const roomInput = document.getElementById('roomInput');
 const leaveBtn = document.getElementById('leaveBtn');
 const joinBtn = document.getElementById('joinBtn');
 const unmuteBtn = document.getElementById('unmuteBtn');
+const callTimer = document.getElementById('callTimer');
 const ytInput = document.getElementById('ytInput');
 const loadBtn = document.getElementById('loadBtn');
 const PREFERRED_YT_QUALITY = 'hd720';
@@ -253,6 +261,40 @@ const MEDIA_CONSTRAINTS = {
     autoGainControl: true
   }
 };
+
+let callStartedAt = 0;
+let callTimerId;
+
+function formatCallDuration(totalSeconds){
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if(hours){
+    return hours + ':' + String(minutes).padStart(2,'0') + ':' + String(seconds).padStart(2,'0');
+  }
+  return String(minutes).padStart(2,'0') + ':' + String(seconds).padStart(2,'0');
+}
+
+function renderCallTimer(){
+  const elapsed = callStartedAt ? Math.floor((Date.now() - callStartedAt) / 1000) : 0;
+  callTimer.textContent = formatCallDuration(elapsed);
+}
+
+function startCallTimer(){
+  if(callStartedAt) return;
+  callStartedAt = Date.now();
+  renderCallTimer();
+  callTimerId = setInterval(renderCallTimer, 1000);
+}
+
+function resetCallTimer(){
+  callStartedAt = 0;
+  if(callTimerId){
+    clearInterval(callTimerId);
+    callTimerId = null;
+  }
+  renderCallTimer();
+}
 
 // Public STUN + a free public TURN relay, so calls still connect across
 // mobile networks / strict NATs where plain STUN alone fails.
@@ -323,6 +365,7 @@ function tuneMediaConnection(conn){
 function attachRemoteStream(remoteStream){
   remoteVideo.srcObject = remoteStream;
   remoteVideo.play().catch(()=>{});
+  startCallTimer();
 }
 
 function cleanupRoom(options = {}){
@@ -341,6 +384,7 @@ function cleanupRoom(options = {}){
   remoteVideo.srcObject = null;
   remoteVideo.muted = true;
   unmuteBtn.textContent = 'Unmute friend';
+  resetCallTimer();
   leaveBtn.style.display = 'none';
 
   if(stopLocal && localStream){
@@ -364,7 +408,10 @@ function bindPeerHandlers(){
       attachRemoteStream(remoteStream);
     });
     call.on('close', () => {
-      if(mediaConn === call) remoteVideo.srcObject = null;
+      if(mediaConn === call){
+        remoteVideo.srcObject = null;
+        resetCallTimer();
+      }
     });
     mediaConn = call;
     tuneMediaConnection(call);
@@ -434,7 +481,10 @@ function joinAsGuest(code, hostId){
         attachRemoteStream(remoteStream);
       });
       call.on('close', () => {
-        if(mediaConn === call) remoteVideo.srcObject = null;
+        if(mediaConn === call){
+          remoteVideo.srcObject = null;
+          resetCallTimer();
+        }
       });
       tuneMediaConnection(call);
     }
