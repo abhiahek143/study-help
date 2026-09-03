@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Together — watch &amp; talk</title>
+<title>Together — watch & talk</title>
 <link rel="preconnect" href="https://unpkg.com">
 <link rel="preconnect" href="https://www.youtube.com">
 <link rel="preconnect" href="https://www.google.com">
 <link rel="preconnect" href="https://i.ytimg.com">
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root{
     --bg: #0f1210;
@@ -27,6 +28,7 @@
     color:var(--text);
     font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     min-height:100vh;
+    padding-bottom: 40px; /* space for status bar */
   }
   header{
     padding:20px 24px 14px;
@@ -50,7 +52,7 @@
     display:grid;
     grid-template-columns: 1fr 300px;
     gap:0;
-    min-height:calc(100vh - 66px);
+    min-height:calc(100vh - 106px);
   }
   @media (max-width:860px){
     .layout{grid-template-columns:1fr;}
@@ -61,6 +63,30 @@
     flex-direction:column;
     gap:16px;
   }
+  
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+  }
+  .tab-btn {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    border-radius: 4px;
+  }
+  .tab-btn.active {
+    background: var(--line);
+    color: var(--text);
+  }
+  .tab-content { display: none; flex-direction: column; gap: 16px; flex: 1; }
+  .tab-content.active { display: flex; }
+
   .player-wrap{
     position:relative;
     width:100%;
@@ -75,7 +101,7 @@
     display:flex;
     gap:8px;
   }
-  .load-row input{
+  .load-row input, textarea{
     flex:1;
     background:var(--panel);
     border:1px solid var(--line);
@@ -84,7 +110,7 @@
     border-radius:4px;
     font-size:14px;
   }
-  .load-row input::placeholder{color:var(--muted);}
+  .load-row input::placeholder, textarea::placeholder{color:var(--muted);}
   button{
     background:var(--accent);
     color:#1a1508;
@@ -123,48 +149,50 @@
     margin:0 0 2px;
     font-weight:600;
   }
-  .id-box{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:4px;
-    padding:10px 12px;
-    font-family:monospace;
-    font-size:14px;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:8px;
-  }
-  .id-box code{color:var(--accent); word-break:break-all;}
   .status{
     font-size:13px;
     color:var(--muted);
   }
   .status.live{color:#8bd28e;}
+  
+  /* Floating Circular Videos */
   .videos{
-    display:flex;
-    gap:8px;
+    position: fixed;
+    bottom: 60px;
+    right: 20px;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 15px;
+    z-index: 1000;
+    pointer-events: none;
   }
   .video-tile{
-    flex:1;
-    aspect-ratio:4/3;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
     background:#000;
-    border:1px solid var(--line);
-    border-radius:4px;
+    border: 3px solid var(--accent);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     overflow:hidden;
     position:relative;
+    pointer-events: auto;
+    animation: float 4s ease-in-out infinite;
+    display: none; /* hidden until stream */
   }
-  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000;transform:translateZ(0);}
-  .video-tile span{
-    position:absolute;
-    bottom:4px;
-    left:6px;
-    font-size:11px;
-    color:var(--muted);
-    background:rgba(0,0,0,.5);
-    padding:1px 5px;
-    border-radius:3px;
+  .video-tile.local {
+    width: 90px;
+    height: 90px;
+    border-color: var(--muted);
+    animation-delay: -2s; /* offset animation */
   }
+  @keyframes float {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+    100% { transform: translateY(0px); }
+  }
+  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000;}
+  
   .connect-row{display:flex; gap:8px;}
   .connect-row input{
     flex:1;
@@ -176,11 +204,61 @@
     font-family:monospace;
     font-size:13px;
   }
-  .call-timer{
-    align-self:flex-start;
-    color:var(--muted);
-    font-family:monospace;
-    font-size:13px;
+  
+  /* Status Bar */
+  .status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 40px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 20px;
+    font-size: 13px;
+    z-index: 1100;
+    color: var(--muted);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .status-item strong { color: var(--text); font-weight: 500; }
+  
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    background: #8bd28e;
+    color: #0f1210;
+    padding: 12px 24px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: transform 0.3s ease;
+    z-index: 2000;
+    font-weight: 500;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast button {
+    background: #0f1210;
+    color: #eef1ec;
+    padding: 6px 12px;
+  }
+
+  /* PDF Viewer */
+  #pdfViewer {
+    flex: 1;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: #fff;
+    display: none;
+    min-height: 500px;
   }
 </style>
 </head>
@@ -188,23 +266,47 @@
 
 <header>
   <h1>Together</h1>
-  <span class="tag">talk while you watch — nothing stored, nothing billed</span>
+  <span class="tag">watch, read, and talk</span>
 </header>
 
 <div class="layout">
 
   <div class="stage">
-    <div class="load-row">
-      <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
-      <button id="loadBtn">Load</button>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="youtube">📺 YouTube</button>
+      <button class="tab-btn" data-tab="pdf">📄 PDF</button>
+      <button class="tab-btn" data-tab="chart">📊 Chart & Notes</button>
     </div>
-    <div class="player-wrap">
-      <div id="yt-player"></div>
+
+    <!-- YouTube Tab -->
+    <div id="tab-youtube" class="tab-content active">
+      <div class="load-row">
+        <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
+        <button id="loadBtn">Load</button>
+      </div>
+      <div class="player-wrap">
+        <div id="yt-player"></div>
+      </div>
+    </div>
+
+    <!-- PDF Tab -->
+    <div id="tab-pdf" class="tab-content">
+      <div class="load-row">
+        <input type="file" id="pdfInput" accept="application/pdf" />
+      </div>
+      <iframe id="pdfViewer"></iframe>
+    </div>
+
+    <!-- Chart Tab -->
+    <div id="tab-chart" class="tab-content">
+      <textarea id="chartData" placeholder="Type comma-separated numbers to generate a chart, or just type notes..." rows="3"></textarea>
+      <div style="flex:1; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:16px;">
+        <canvas id="myChart" style="width:100%; max-height:400px;"></canvas>
+      </div>
     </div>
   </div>
 
   <div class="sidebar">
-
     <div class="block">
       <h2>Room code</h2>
       <div class="connect-row">
@@ -216,43 +318,153 @@
     </div>
 
     <div class="block">
-      <h2>Video call</h2>
-      <div class="videos">
-        <div class="video-tile">
-          <video id="localVideo" autoplay muted playsinline></video>
-          <span>You</span>
-        </div>
-        <div class="video-tile">
-          <video id="remoteVideo" autoplay playsinline muted></video>
-          <span>Friend</span>
-        </div>
-      </div>
-      <button class="secondary" id="unmuteBtn" style="align-self:flex-start;">Unmute friend</button>
-      <div class="call-timer" id="callTimer">00:00</div>
+      <h2>Video call Controls</h2>
+      <button class="secondary" id="unmuteBtn" style="align-self:flex-start; display:none;">Unmute friend</button>
+      <button class="secondary" id="camBtn" style="align-self:flex-start; display:none;">Toggle Camera</button>
+      <button class="secondary" id="micBtn" style="align-self:flex-start; display:none;">Toggle Mic</button>
     </div>
-
   </div>
 </div>
 
+<!-- Floating Videos -->
+<div class="videos">
+  <div class="video-tile" id="remoteTile">
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+  <div class="video-tile local" id="localTile">
+    <video id="localVideo" autoplay muted playsinline></video>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="status-item">Room: <strong id="sb-room">🔴 Not connected</strong></div>
+  <div class="status-item">Camera: <strong id="sb-cam">🚫 Off</strong></div>
+  <div class="status-item">Mic: <strong id="sb-mic">🚫 Off</strong></div>
+  <div class="status-item">Duration: <strong id="sb-timer">00:00</strong></div>
+  <div class="status-item">Friend: <strong id="sb-friend">None</strong></div>
+  <div class="status-item">Mode: <strong id="sb-mode">📺 YouTube</strong></div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast">
+  <span>🟢 Your friend is online!</span>
+  <button id="toastJoinBtn">Join Call</button>
+</div>
+
 <script>
+/* ---------- Tabs Logic ---------- */
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+const sbMode = document.getElementById('sb-mode');
+
+tabBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    sbMode.textContent = btn.textContent;
+    
+    // Sync mode change
+    sendSync({ type: 'mode', mode: btn.dataset.tab });
+  });
+});
+
+/* ---------- Chart Logic ---------- */
+let chartInstance = null;
+const chartDataInput = document.getElementById('chartData');
+
+function renderChart(text) {
+  const ctx = document.getElementById('myChart').getContext('2d');
+  
+  // Try to parse numbers from text
+  const numbers = text.split(/[,\s]+/).map(n => parseFloat(n)).filter(n => !isNaN(n));
+  
+  if (chartInstance) {
+    chartInstance.destroy();
+  }
+  
+  if (numbers.length > 0) {
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: numbers.map((_, i) => 'Data ' + (i+1)),
+        datasets: [{
+          label: 'Values',
+          data: numbers,
+          backgroundColor: '#ffb454',
+          borderColor: '#ffb454',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, grid: { color: '#2a302b' } },
+          x: { grid: { color: '#2a302b' } }
+        },
+        plugins: {
+          legend: { labels: { color: '#eef1ec' } }
+        }
+      }
+    });
+  }
+}
+
+chartDataInput.addEventListener('input', (e) => {
+  renderChart(e.target.value);
+  sendSync({ type: 'chart', text: e.target.value });
+});
+
+/* ---------- PDF Logic ---------- */
+const pdfInput = document.getElementById('pdfInput');
+const pdfViewer = document.getElementById('pdfViewer');
+
+pdfInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    const url = URL.createObjectURL(file);
+    pdfViewer.src = url;
+    pdfViewer.style.display = 'block';
+    sendSync({ type: 'pdf-load' }); // Just let friend know you loaded a PDF
+  }
+});
+
+
 /* ---------- PeerJS setup ---------- */
 let peer, localStream, mediaConn, dataConn, roomHostId, role;
 const peerStatusEl = document.getElementById('peerStatus');
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
+const localTile = document.getElementById('localTile');
+const remoteTile = document.getElementById('remoteTile');
 const roomInput = document.getElementById('roomInput');
 const leaveBtn = document.getElementById('leaveBtn');
 const joinBtn = document.getElementById('joinBtn');
 const unmuteBtn = document.getElementById('unmuteBtn');
-const callTimer = document.getElementById('callTimer');
+const camBtn = document.getElementById('camBtn');
+const micBtn = document.getElementById('micBtn');
+
+// Status bar elements
+const sbRoom = document.getElementById('sb-room');
+const sbCam = document.getElementById('sb-cam');
+const sbMic = document.getElementById('sb-mic');
+const sbTimer = document.getElementById('sb-timer');
+const sbFriend = document.getElementById('sb-friend');
+
+const toast = document.getElementById('toast');
+const toastJoinBtn = document.getElementById('toastJoinBtn');
+
 const ytInput = document.getElementById('ytInput');
 const loadBtn = document.getElementById('loadBtn');
 const PREFERRED_YT_QUALITY = 'hd720';
 const MEDIA_CONSTRAINTS = {
   video: {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 30, max: 30 },
+    width: { ideal: 320 },
+    height: { ideal: 240 },
+    frameRate: { ideal: 15, max: 15 },
     facingMode: 'user'
   },
   audio: {
@@ -277,7 +489,7 @@ function formatCallDuration(totalSeconds){
 
 function renderCallTimer(){
   const elapsed = callStartedAt ? Math.floor((Date.now() - callStartedAt) / 1000) : 0;
-  callTimer.textContent = formatCallDuration(elapsed);
+  sbTimer.textContent = formatCallDuration(elapsed);
 }
 
 function startCallTimer(){
@@ -296,8 +508,6 @@ function resetCallTimer(){
   renderCallTimer();
 }
 
-// Public STUN + a free public TURN relay, so calls still connect across
-// mobile networks / strict NATs where plain STUN alone fails.
 const ICE_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -314,7 +524,7 @@ function sanitizeRoom(code){
 async function ensureLocalStream(){
   if(localStream && localStream.active) return localStream;
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    peerStatusEl.textContent = 'Camera/mic needs a secure browser context. Open this from localhost or HTTPS.';
+    peerStatusEl.textContent = 'Camera/mic needs a secure browser context.';
     return null;
   }
   try{
@@ -323,7 +533,7 @@ async function ensureLocalStream(){
     try{
       localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
     }catch(err){
-      peerStatusEl.textContent = 'Camera/mic blocked — video call disabled, watch-together still works.';
+      peerStatusEl.textContent = 'Camera/mic blocked.';
       return null;
     }
   }
@@ -331,6 +541,10 @@ async function ensureLocalStream(){
   tuneLocalStream(localStream);
   localVideo.srcObject = localStream;
   localVideo.play().catch(()=>{});
+  localTile.style.display = 'block';
+  camBtn.style.display = 'inline-block';
+  micBtn.style.display = 'inline-block';
+  updateDeviceStatus();
   return localStream;
 }
 
@@ -340,6 +554,38 @@ function tuneLocalStream(stream){
   if(videoTrack && 'contentHint' in videoTrack) videoTrack.contentHint = 'motion';
   if(audioTrack && 'contentHint' in audioTrack) audioTrack.contentHint = 'speech';
 }
+
+function updateDeviceStatus() {
+  if (localStream) {
+    const videoTrack = localStream.getVideoTracks()[0];
+    const audioTrack = localStream.getAudioTracks()[0];
+    sbCam.textContent = (videoTrack && videoTrack.enabled) ? '✅ On' : '🚫 Off';
+    sbMic.textContent = (audioTrack && audioTrack.enabled) ? '✅ On' : '🚫 Off';
+  } else {
+    sbCam.textContent = '🚫 Off';
+    sbMic.textContent = '🚫 Off';
+  }
+}
+
+camBtn.onclick = () => {
+  if (localStream) {
+    const track = localStream.getVideoTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      updateDeviceStatus();
+    }
+  }
+};
+micBtn.onclick = () => {
+  if (localStream) {
+    const track = localStream.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      updateDeviceStatus();
+    }
+  }
+};
+
 
 function tuneMediaConnection(conn){
   if(!conn) return;
@@ -353,8 +599,8 @@ function tuneMediaConnection(conn){
 
     const params = sender.getParameters();
     if(!params.encodings || !params.encodings.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = 1800000;
-    params.encodings[0].maxFramerate = 30;
+    params.encodings[0].maxBitrate = 200000; // Low quality 200kbps
+    params.encodings[0].maxFramerate = 15;
     sender.setParameters(params).catch(()=>{});
   };
 
@@ -365,7 +611,11 @@ function tuneMediaConnection(conn){
 function attachRemoteStream(remoteStream){
   remoteVideo.srcObject = remoteStream;
   remoteVideo.play().catch(()=>{});
+  remoteTile.style.display = 'block';
+  unmuteBtn.style.display = 'inline-block';
+  sbFriend.textContent = 'Connected ✅';
   startCallTimer();
+  toast.classList.remove('show');
 }
 
 function cleanupRoom(options = {}){
@@ -382,19 +632,47 @@ function cleanupRoom(options = {}){
   roomHostId = null;
   role = null;
   remoteVideo.srcObject = null;
-  remoteVideo.muted = true;
-  unmuteBtn.textContent = 'Unmute friend';
+  remoteTile.style.display = 'none';
+  unmuteBtn.style.display = 'none';
+  sbFriend.textContent = 'None';
   resetCallTimer();
   leaveBtn.style.display = 'none';
 
   if(stopLocal && localStream){
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
-    localVideo.srcObject = localStream;
+    localVideo.srcObject = null;
+    localTile.style.display = 'none';
+    camBtn.style.display = 'none';
+    micBtn.style.display = 'none';
+    updateDeviceStatus();
   }
 
   if(resetStatus) setStatus(false);
 }
+
+function showFriendOnlineToast() {
+  if (!mediaConn) {
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 8000);
+  }
+}
+
+toastJoinBtn.onclick = async () => {
+  toast.classList.remove('show');
+  const stream = await ensureLocalStream();
+  if (stream && dataConn && dataConn.open && role === 'guest') {
+    const call = peer.call(roomHostId, stream);
+    mediaConn = call;
+    call.on('stream', remoteStream => attachRemoteStream(remoteStream));
+    call.on('close', () => {
+      remoteVideo.srcObject = null;
+      remoteTile.style.display = 'none';
+      resetCallTimer();
+    });
+    tuneMediaConnection(call);
+  }
+};
 
 function bindPeerHandlers(){
   const activePeer = peer;
@@ -404,12 +682,11 @@ function bindPeerHandlers(){
     const stream = await ensureLocalStream();
     if(peer !== activePeer) return;
     call.answer(stream || undefined);
-    call.on('stream', remoteStream => {
-      attachRemoteStream(remoteStream);
-    });
+    call.on('stream', remoteStream => attachRemoteStream(remoteStream));
     call.on('close', () => {
       if(mediaConn === call){
         remoteVideo.srcObject = null;
+        remoteTile.style.display = 'none';
         resetCallTimer();
       }
     });
@@ -420,7 +697,11 @@ function bindPeerHandlers(){
   activePeer.on('connection', conn => {
     if(peer !== activePeer) return;
     dataConn = conn;
-    dataConn.on('open', () => { setStatus(true); flushQueue(); });
+    dataConn.on('open', () => { 
+      setStatus(true); 
+      flushQueue(); 
+      showFriendOnlineToast();
+    });
     wireData(conn);
   });
 
@@ -432,15 +713,11 @@ function bindPeerHandlers(){
   });
 }
 
-// The first person to type a room code becomes the "room" itself (their
-// Peer ID = the room code). Whoever types the same code next finds that ID
-// already taken, so they connect to it as a guest instead — no manual ID
-// copy-pasting needed on either side.
 async function joinRoom(code){
   if(peer) cleanupRoom({ stopLocal:false, resetStatus:false });
-  await ensureLocalStream();
   roomHostId = 'room-' + code;
   peerStatusEl.textContent = 'Joining "' + code + '"…';
+  sbRoom.textContent = '🟡 Connecting...';
 
   peer = new Peer(roomHostId, { config: ICE_CONFIG });
   bindPeerHandlers();
@@ -448,6 +725,7 @@ async function joinRoom(code){
   peer.on('open', () => {
     role = 'host';
     peerStatusEl.textContent = 'Room "' + code + '" created — waiting for your friend to join…';
+    sbRoom.textContent = '🟢 ' + code;
     leaveBtn.style.display = 'inline-block';
   });
 
@@ -456,6 +734,7 @@ async function joinRoom(code){
       joinAsGuest(code, roomHostId);
     }else{
       peerStatusEl.textContent = 'Connection error: ' + err.type;
+      sbRoom.textContent = '🔴 Error';
     }
   });
 }
@@ -469,33 +748,27 @@ function joinAsGuest(code, hostId){
   peer = new Peer(guestId, { config: ICE_CONFIG });
   bindPeerHandlers();
   peerStatusEl.textContent = 'Room "' + code + '" found — connecting…';
+  sbRoom.textContent = '🟡 Connecting...';
 
   peer.on('open', () => {
     role = 'guest';
+    sbRoom.textContent = '🟢 ' + code;
     leaveBtn.style.display = 'inline-block';
 
-    if(localStream){
-      const call = peer.call(roomHostId, localStream);
-      mediaConn = call;
-      call.on('stream', remoteStream => {
-        attachRemoteStream(remoteStream);
-      });
-      call.on('close', () => {
-        if(mediaConn === call){
-          remoteVideo.srcObject = null;
-          resetCallTimer();
-        }
-      });
-      tuneMediaConnection(call);
-    }
-
     dataConn = peer.connect(roomHostId, { reliable:true });
-    dataConn.on('open', () => { setStatus(true); flushQueue(); });
+    dataConn.on('open', () => { 
+      setStatus(true); 
+      flushQueue(); 
+      showFriendOnlineToast();
+    });
     wireData(dataConn);
+    
+    // We do NOT auto-call media here, we wait for user to click Toast or Join Video
   });
 
   peer.on('error', err => {
     peerStatusEl.textContent = 'Connection error: ' + err.type;
+    sbRoom.textContent = '🔴 Error';
   });
 }
 
@@ -508,12 +781,12 @@ joinBtn.onclick = () => {
 leaveBtn.onclick = () => {
   cleanupRoom({ stopLocal:true });
   peerStatusEl.textContent = 'Enter a room code — whoever types the same one lands in the same room.';
+  sbRoom.textContent = '🔴 Not connected';
 };
 
 unmuteBtn.onclick = () => {
   remoteVideo.muted = !remoteVideo.muted;
   unmuteBtn.textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
-  remoteVideo.play().catch(()=>{});
 };
 
 function setStatus(live, message){
@@ -522,9 +795,9 @@ function setStatus(live, message){
 }
 
 /* ---------- Data channel: sync YouTube playback ---------- */
-let applyingRemote = false; // guards against echoing our own sync back out
-let outQueue = [];   // messages waiting for the data channel to open
-let inQueue = [];    // incoming messages that arrived before the player was ready
+let applyingRemote = false;
+let outQueue = [];
+let inQueue = [];
 let remoteApplyTimer;
 let playbackMonitorId;
 let lastMonitorAt = 0;
@@ -535,6 +808,22 @@ function wireData(conn = dataConn){
   wiredDataConnections.add(conn);
 
   conn.on('data', msg => {
+    if(msg.type === 'chart') {
+      chartDataInput.value = msg.text;
+      renderChart(msg.text);
+      return;
+    }
+    if(msg.type === 'mode') {
+      const btn = document.querySelector(`.tab-btn[data-tab="${msg.mode}"]`);
+      if (btn) btn.click();
+      return;
+    }
+    if(msg.type === 'pdf-load') {
+      // Just notify user
+      alert("Your friend just loaded a PDF to read.");
+      return;
+    }
+    
     if(!player || !playerReady){ inQueue.push(msg); return; }
     applyIncoming(msg);
   });
@@ -585,7 +874,7 @@ function sendSync(payload){
   if(dataConn && dataConn.open){
     dataConn.send(payload);
   }else{
-    queueSync(payload); // sent as soon as the connection opens
+    queueSync(payload);
   }
 }
 
