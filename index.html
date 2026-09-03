@@ -358,16 +358,24 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
 const sbMode = document.getElementById('sb-mode');
 
+function switchTab(mode, isRemote = false) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${mode}"]`);
+  if (!btn) return;
+  
+  tabBtns.forEach(b => b.classList.remove('active'));
+  tabContents.forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + mode).classList.add('active');
+  sbMode.textContent = btn.textContent;
+  
+  if (!isRemote) {
+    sendSync({ type: 'mode', mode: mode });
+  }
+}
+
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    tabBtns.forEach(b => b.classList.remove('active'));
-    tabContents.forEach(c => c.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    sbMode.textContent = btn.textContent;
-    
-    // Sync mode change
-    sendSync({ type: 'mode', mode: btn.dataset.tab });
+    switchTab(btn.dataset.tab, false);
   });
 });
 
@@ -814,8 +822,7 @@ function wireData(conn = dataConn){
       return;
     }
     if(msg.type === 'mode') {
-      const btn = document.querySelector(`.tab-btn[data-tab="${msg.mode}"]`);
-      if (btn) btn.click();
+      switchTab(msg.mode, true);
       return;
     }
     if(msg.type === 'pdf-load') {
