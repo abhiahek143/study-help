@@ -69,3 +69,6 @@ Because the app is only one HTML file, it can be deployed on any static hosting 
 ## Privacy
 
 Together does not store messages, video, room codes, or watch history. The app runs in the browser and uses peer-to-peer browser connections for the room and call.
+
+#dev 
+abhishek hs 
