@@ -583,8 +583,9 @@ function showFriendOnlineToast() {
 toastJoinBtn.onclick = async () => {
   toast.classList.remove('show');
   const stream = await ensureLocalStream();
-  if (stream && dataConn && dataConn.open && role === 'guest') {
-    const call = peer.call(roomHostId, stream);
+  if (stream && dataConn && dataConn.open) {
+    const targetId = dataConn.peer;
+    const call = peer.call(targetId, stream);
     mediaConn = call;
     call.on('stream', remoteStream => attachRemoteStream(remoteStream));
     call.on('close', () => {
