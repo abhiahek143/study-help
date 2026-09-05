@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://www.google.com">
 <link rel="preconnect" href="https://i.ytimg.com">
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
   :root{
     --bg: #0f1210;
@@ -64,28 +64,7 @@
     gap:16px;
   }
   
-  /* Tabs */
-  .tabs {
-    display: flex;
-    gap: 10px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 10px;
-  }
-  .tab-btn {
-    background: transparent;
-    color: var(--muted);
-    border: none;
-    padding: 8px 16px;
-    cursor: pointer;
-    font-size: 14px;
-    border-radius: 4px;
-  }
-  .tab-btn.active {
-    background: var(--line);
-    color: var(--text);
-  }
-  .tab-content { display: none; flex-direction: column; gap: 16px; flex: 1; }
-  .tab-content.active { display: flex; }
+
 
   .player-wrap{
     position:relative;
@@ -156,42 +135,47 @@
   .status.live{color:#8bd28e;}
   
   /* Floating Circular Videos */
-  .videos{
+  .video-tile{
     position: fixed;
     bottom: 60px;
     right: 20px;
-    display: flex;
-    flex-direction: column-reverse;
-    align-items: flex-end;
-    gap: 15px;
-    z-index: 1000;
-    pointer-events: none;
-  }
-  .video-tile{
-    width: 140px;
-    height: 140px;
+    width: 160px;
+    height: 160px;
     border-radius: 50%;
     background:#000;
     border: 3px solid var(--accent);
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     overflow:hidden;
-    position:relative;
-    pointer-events: auto;
-    animation: float 4s ease-in-out infinite;
+    z-index: 1000;
     display: none; /* hidden until stream */
+    cursor: move;
   }
-  .video-tile.local {
-    width: 90px;
-    height: 90px;
-    border-color: var(--muted);
-    animation-delay: -2s; /* offset animation */
+  .drag-handle {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 2;
   }
-  @keyframes float {
-    0% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-    100% { transform: translateY(0px); }
+  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000; position:relative; z-index:1; pointer-events:none;}
+  
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
   }
-  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000;}
+  .modal-content {
+    background: var(--panel);
+    padding: 24px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    max-width: 400px;
+    width: 90%;
+  }
+  .modal-content h2 { margin-top: 0; }
   
   .connect-row{display:flex; gap:8px;}
   .connect-row input{
@@ -250,16 +234,7 @@
     padding: 6px 12px;
   }
 
-  /* PDF Viewer */
-  #pdfViewer {
-    flex: 1;
-    width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: #fff;
-    display: none;
-    min-height: 500px;
-  }
+
 </style>
 </head>
 <body>
@@ -272,37 +247,12 @@
 <div class="layout">
 
   <div class="stage">
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="youtube">📺 YouTube</button>
-      <button class="tab-btn" data-tab="pdf">📄 PDF</button>
-      <button class="tab-btn" data-tab="chart">📊 Chart & Notes</button>
+    <div class="load-row">
+      <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
+      <button id="loadBtn">Load</button>
     </div>
-
-    <!-- YouTube Tab -->
-    <div id="tab-youtube" class="tab-content active">
-      <div class="load-row">
-        <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
-        <button id="loadBtn">Load</button>
-      </div>
-      <div class="player-wrap">
-        <div id="yt-player"></div>
-      </div>
-    </div>
-
-    <!-- PDF Tab -->
-    <div id="tab-pdf" class="tab-content">
-      <div class="load-row">
-        <input type="file" id="pdfInput" accept="application/pdf" />
-      </div>
-      <iframe id="pdfViewer"></iframe>
-    </div>
-
-    <!-- Chart Tab -->
-    <div id="tab-chart" class="tab-content">
-      <textarea id="chartData" placeholder="Type comma-separated numbers to generate a chart, or just type notes..." rows="3"></textarea>
-      <div style="flex:1; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:16px;">
-        <canvas id="myChart" style="width:100%; max-height:400px;"></canvas>
-      </div>
+    <div class="player-wrap">
+      <div id="yt-player"></div>
     </div>
   </div>
 
@@ -327,12 +277,20 @@
 </div>
 
 <!-- Floating Videos -->
-<div class="videos">
-  <div class="video-tile" id="remoteTile">
-    <video id="remoteVideo" autoplay playsinline></video>
-  </div>
-  <div class="video-tile local" id="localTile">
-    <video id="localVideo" autoplay muted playsinline></video>
+<div class="video-tile" id="remoteTile">
+  <div class="drag-handle"></div>
+  <video id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<!-- Permission Modal -->
+<div id="permissionModal" class="modal-overlay">
+  <div class="modal-content">
+    <h2>Enable Camera & Mic</h2>
+    <p>Please allow access to your camera and microphone to video chat with your friend.</p>
+    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
+      <button class="secondary" id="denyPermBtn">Cancel</button>
+      <button id="allowPermBtn">Allow</button>
+    </div>
   </div>
 </div>
 
@@ -343,7 +301,7 @@
   <div class="status-item">Mic: <strong id="sb-mic">🚫 Off</strong></div>
   <div class="status-item">Duration: <strong id="sb-timer">00:00</strong></div>
   <div class="status-item">Friend: <strong id="sb-friend">None</strong></div>
-  <div class="status-item">Mode: <strong id="sb-mode">📺 YouTube</strong></div>
+  
 </div>
 
 <!-- Toast -->
@@ -353,100 +311,12 @@
 </div>
 
 <script>
-/* ---------- Tabs Logic ---------- */
-const tabBtns = document.querySelectorAll('.tab-btn');
-const tabContents = document.querySelectorAll('.tab-content');
-const sbMode = document.getElementById('sb-mode');
-
-function switchTab(mode, isRemote = false) {
-  const btn = document.querySelector(`.tab-btn[data-tab="${mode}"]`);
-  if (!btn) return;
-  
-  tabBtns.forEach(b => b.classList.remove('active'));
-  tabContents.forEach(c => c.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('tab-' + mode).classList.add('active');
-  sbMode.textContent = btn.textContent;
-  
-  if (!isRemote) {
-    sendSync({ type: 'mode', mode: mode });
-  }
-}
-
-tabBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    switchTab(btn.dataset.tab, false);
-  });
-});
-
-/* ---------- Chart Logic ---------- */
-let chartInstance = null;
-const chartDataInput = document.getElementById('chartData');
-
-function renderChart(text) {
-  const ctx = document.getElementById('myChart').getContext('2d');
-  
-  // Try to parse numbers from text
-  const numbers = text.split(/[,\s]+/).map(n => parseFloat(n)).filter(n => !isNaN(n));
-  
-  if (chartInstance) {
-    chartInstance.destroy();
-  }
-  
-  if (numbers.length > 0) {
-    chartInstance = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: numbers.map((_, i) => 'Data ' + (i+1)),
-        datasets: [{
-          label: 'Values',
-          data: numbers,
-          backgroundColor: '#ffb454',
-          borderColor: '#ffb454',
-          borderWidth: 1
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true, grid: { color: '#2a302b' } },
-          x: { grid: { color: '#2a302b' } }
-        },
-        plugins: {
-          legend: { labels: { color: '#eef1ec' } }
-        }
-      }
-    });
-  }
-}
-
-chartDataInput.addEventListener('input', (e) => {
-  renderChart(e.target.value);
-  sendSync({ type: 'chart', text: e.target.value });
-});
-
-/* ---------- PDF Logic ---------- */
-const pdfInput = document.getElementById('pdfInput');
-const pdfViewer = document.getElementById('pdfViewer');
-
-pdfInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    const url = URL.createObjectURL(file);
-    pdfViewer.src = url;
-    pdfViewer.style.display = 'block';
-    sendSync({ type: 'pdf-load' }); // Just let friend know you loaded a PDF
-  }
-});
 
 
 /* ---------- PeerJS setup ---------- */
 let peer, localStream, mediaConn, dataConn, roomHostId, role;
 const peerStatusEl = document.getElementById('peerStatus');
-const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
-const localTile = document.getElementById('localTile');
 const remoteTile = document.getElementById('remoteTile');
 const roomInput = document.getElementById('roomInput');
 const leaveBtn = document.getElementById('leaveBtn');
@@ -529,11 +399,18 @@ function sanitizeRoom(code){
   return code.trim().toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,24);
 }
 
-async function ensureLocalStream(){
-  if(localStream && localStream.active) return localStream;
+let streamPromiseResolve = null;
+
+const permissionModal = document.getElementById('permissionModal');
+const allowPermBtn = document.getElementById('allowPermBtn');
+const denyPermBtn = document.getElementById('denyPermBtn');
+
+allowPermBtn.onclick = async () => {
+  permissionModal.style.display = 'none';
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
     peerStatusEl.textContent = 'Camera/mic needs a secure browser context.';
-    return null;
+    if(streamPromiseResolve) streamPromiseResolve(null);
+    return;
   }
   try{
     localStream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS);
@@ -542,19 +419,58 @@ async function ensureLocalStream(){
       localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
     }catch(err){
       peerStatusEl.textContent = 'Camera/mic blocked.';
-      return null;
+      if(streamPromiseResolve) streamPromiseResolve(null);
+      return;
     }
   }
-
   tuneLocalStream(localStream);
-  localVideo.srcObject = localStream;
-  localVideo.play().catch(()=>{});
-  localTile.style.display = 'block';
   camBtn.style.display = 'inline-block';
   micBtn.style.display = 'inline-block';
   updateDeviceStatus();
-  return localStream;
+  if(streamPromiseResolve) streamPromiseResolve(localStream);
+};
+
+denyPermBtn.onclick = () => {
+  permissionModal.style.display = 'none';
+  if(streamPromiseResolve) streamPromiseResolve(null);
+};
+
+function ensureLocalStream(){
+  return new Promise((resolve) => {
+    if(localStream && localStream.active) {
+      resolve(localStream);
+      return;
+    }
+    streamPromiseResolve = resolve;
+    permissionModal.style.display = 'flex';
+  });
 }
+
+// Draggable logic for friend video
+const remoteTile = document.getElementById('remoteTile');
+let isDragging = false;
+let offsetX = 0, offsetY = 0;
+
+remoteTile.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  const rect = remoteTile.getBoundingClientRect();
+  offsetX = e.clientX - rect.left;
+  offsetY = e.clientY - rect.top;
+  // disable pointer events on video while dragging
+  remoteTile.querySelector('video').style.pointerEvents = 'none';
+});
+window.addEventListener('mousemove', (e) => {
+  if(!isDragging) return;
+  remoteTile.style.right = 'auto';
+  remoteTile.style.bottom = 'auto';
+  remoteTile.style.left = (e.clientX - offsetX) + 'px';
+  remoteTile.style.top = (e.clientY - offsetY) + 'px';
+});
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+  // remoteTile.querySelector('video').style.pointerEvents = 'auto'; // optional, keeping none so it always drags
+});
+
 
 function tuneLocalStream(stream){
   const videoTrack = stream.getVideoTracks()[0];
@@ -649,8 +565,6 @@ function cleanupRoom(options = {}){
   if(stopLocal && localStream){
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
-    localVideo.srcObject = null;
-    localTile.style.display = 'none';
     camBtn.style.display = 'none';
     micBtn.style.display = 'none';
     updateDeviceStatus();
@@ -816,21 +730,7 @@ function wireData(conn = dataConn){
   wiredDataConnections.add(conn);
 
   conn.on('data', msg => {
-    if(msg.type === 'chart') {
-      chartDataInput.value = msg.text;
-      renderChart(msg.text);
-      return;
-    }
-    if(msg.type === 'mode') {
-      switchTab(msg.mode, true);
-      return;
-    }
-    if(msg.type === 'pdf-load') {
-      // Just notify user
-      alert("Your friend just loaded a PDF to read.");
-      return;
-    }
-    
+
     if(!player || !playerReady){ inQueue.push(msg); return; }
     applyIncoming(msg);
   });
