@@ -1,916 +1,996 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Together — watch & talk</title>
-<link rel="preconnect" href="https://unpkg.com">
-<link rel="preconnect" href="https://www.youtube.com">
-<link rel="preconnect" href="https://www.google.com">
-<link rel="preconnect" href="https://i.ytimg.com">
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Together — watch & talk</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://www.youtube.com">
+  <link rel="preconnect" href="https://www.google.com">
+  <link rel="preconnect" href="https://i.ytimg.com">
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
-<style>
-  :root{
-    --bg: #0f1210;
-    --panel: #171b18;
-    --line: #2a302b;
-    --text: #eef1ec;
-    --muted: #8f9a90;
-    --accent: #ffb454;
-    --accent-dim: #6b5a34;
-    --danger: #e0654f;
-  }
-  *{box-sizing:border-box;}
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    min-height:100vh;
-    padding-bottom: 40px; /* space for status bar */
-  }
-  header{
-    padding:20px 24px 14px;
-    border-bottom:1px solid var(--line);
-    display:flex;
-    align-items:baseline;
-    gap:12px;
-    flex-wrap:wrap;
-  }
-  header h1{
-    font-size:20px;
-    margin:0;
-    font-weight:600;
-    letter-spacing:.2px;
-  }
-  header span.tag{
-    color:var(--muted);
-    font-size:13px;
-  }
-  .layout{
-    display:grid;
-    grid-template-columns: 1fr 300px;
-    gap:0;
-    min-height:calc(100vh - 106px);
-  }
-  @media (max-width:860px){
-    .layout{grid-template-columns:1fr;}
-  }
-  .stage{
-    padding:24px;
-    display:flex;
-    flex-direction:column;
-    gap:16px;
-  }
-  
+  <style>
+    :root {
+      --bg: #0f1210;
+      --panel: #171b18;
+      --line: #2a302b;
+      --text: #eef1ec;
+      --muted: #8f9a90;
+      --accent: #ffb454;
+      --accent-dim: #6b5a34;
+      --danger: #e0654f;
+    }
 
+    * {
+      box-sizing: border-box;
+    }
 
-  .player-wrap{
-    position:relative;
-    width:100%;
-    aspect-ratio:16/9;
-    background:#000;
-    border:1px solid var(--line);
-    border-radius:4px;
-    overflow:hidden;
-  }
-  #yt-player, #yt-player iframe{ width:100%; height:100%; display:block; }
-  .load-row{
-    display:flex;
-    gap:8px;
-  }
-  .load-row input, textarea{
-    flex:1;
-    background:var(--panel);
-    border:1px solid var(--line);
-    color:var(--text);
-    padding:10px 12px;
-    border-radius:4px;
-    font-size:14px;
-  }
-  .load-row input::placeholder, textarea::placeholder{color:var(--muted);}
-  button{
-    background:var(--accent);
-    color:#1a1508;
-    border:none;
-    padding:10px 16px;
-    border-radius:4px;
-    font-weight:600;
-    font-size:14px;
-    cursor:pointer;
-  }
-  button:hover{filter:brightness(1.08);}
-  button.secondary{
-    background:transparent;
-    border:1px solid var(--line);
-    color:var(--text);
-  }
-  button:disabled{
-    opacity:.4;
-    cursor:not-allowed;
-  }
-  .sidebar{
-    border-left:1px solid var(--line);
-    padding:24px;
-    display:flex;
-    flex-direction:column;
-    gap:22px;
-  }
-  .block{
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-  }
-  .block h2{
-    font-size:12px;
-    color:var(--muted);
-    margin:0 0 2px;
-    font-weight:600;
-  }
-  .status{
-    font-size:13px;
-    color:var(--muted);
-  }
-  .status.live{color:#8bd28e;}
-  
-  /* Floating Circular Videos */
-  .video-tile{
-    position: fixed;
-    bottom: 60px;
-    right: 20px;
-    width: 160px;
-    height: 160px;
-    border-radius: 50%;
-    background:#000;
-    border: 3px solid var(--accent);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    overflow:hidden;
-    z-index: 1000;
-    display: none; /* hidden until stream */
-    cursor: move;
-  }
-  .drag-handle {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 2;
-  }
-  .video-tile video{width:100%;height:100%;object-fit:cover;background:#000; position:relative; z-index:1; pointer-events:none;}
-  
-  /* Modal */
-  .modal-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.6);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 3000;
-  }
-  .modal-content {
-    background: var(--panel);
-    padding: 24px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    max-width: 400px;
-    width: 90%;
-  }
-  .modal-content h2 { margin-top: 0; }
-  
-  .connect-row{display:flex; gap:8px;}
-  .connect-row input{
-    flex:1;
-    background:var(--panel);
-    border:1px solid var(--line);
-    color:var(--text);
-    padding:8px 10px;
-    border-radius:4px;
-    font-family:monospace;
-    font-size:13px;
-  }
-  
-  /* Status Bar */
-  .status-bar {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 40px;
-    background: var(--panel);
-    border-top: 1px solid var(--line);
-    display: flex;
-    align-items: center;
-    padding: 0 24px;
-    gap: 20px;
-    font-size: 13px;
-    z-index: 1100;
-    color: var(--muted);
-    overflow-x: auto;
-    white-space: nowrap;
-  }
-  .status-item { display: flex; align-items: center; gap: 6px; }
-  .status-item strong { color: var(--text); font-weight: 500; }
-  
-  /* Toast */
-  .toast {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-100px);
-    background: #8bd28e;
-    color: #0f1210;
-    padding: 12px 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    transition: transform 0.3s ease;
-    z-index: 2000;
-    font-weight: 500;
-  }
-  .toast.show { transform: translateX(-50%) translateY(0); }
-  .toast button {
-    background: #0f1210;
-    color: #eef1ec;
-    padding: 6px 12px;
-  }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      padding-bottom: 40px;
+      /* space for status bar */
+    }
+
+    header {
+      padding: 20px 24px 14px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    header h1 {
+      font-size: 20px;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+
+    header span.tag {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 0;
+      min-height: calc(100vh - 106px);
+    }
+
+    @media (max-width:860px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .stage {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
 
 
-</style>
+
+    .player-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    #yt-player,
+    #yt-player iframe {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .load-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .load-row input,
+    textarea {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .load-row input::placeholder,
+    textarea::placeholder {
+      color: var(--muted);
+    }
+
+    button {
+      background: var(--accent);
+      color: #1a1508;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      filter: brightness(1.08);
+    }
+
+    button.secondary {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+
+    button:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .sidebar {
+      border-left: 1px solid var(--line);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .block h2 {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0 0 2px;
+      font-weight: 600;
+    }
+
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .status.live {
+      color: #8bd28e;
+    }
+
+    /* Floating Circular Videos */
+    .video-tile {
+      position: fixed;
+      bottom: 60px;
+      right: 20px;
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      background: #000;
+      border: 3px solid var(--accent);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+      z-index: 1000;
+      display: none;
+      /* hidden until stream */
+      cursor: move;
+    }
+
+    .drag-handle {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 2;
+    }
+
+    .video-tile video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+      position: relative;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000;
+    }
+
+    .modal-content {
+      background: var(--panel);
+      padding: 24px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      max-width: 400px;
+      width: 90%;
+    }
+
+    .modal-content h2 {
+      margin-top: 0;
+    }
+
+    .connect-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .connect-row input {
+      flex: 1;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    /* Status Bar */
+    .status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 20px;
+      font-size: 13px;
+      z-index: 1100;
+      color: var(--muted);
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-item strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: #8bd28e;
+      color: #0f1210;
+      padding: 12px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: transform 0.3s ease;
+      z-index: 2000;
+      font-weight: 500;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .toast button {
+      background: #0f1210;
+      color: #eef1ec;
+      padding: 6px 12px;
+    }
+  </style>
 </head>
+
 <body>
 
-<header>
-  <h1>Together</h1>
-  <span class="tag">watch, read, and talk</span>
-</header>
+  <header>
+    <h1>Together</h1>
+    <span class="tag">watch, read, and talk</span>
+  </header>
 
-<div class="layout">
+  <div class="layout">
 
-  <div class="stage">
-    <div class="load-row">
-      <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
-      <button id="loadBtn">Load</button>
-    </div>
-    <div class="player-wrap">
-      <div id="yt-player"></div>
-    </div>
-  </div>
-
-  <div class="sidebar">
-    <div class="block">
-      <h2>Room code</h2>
-      <div class="connect-row">
-        <input id="roomInput" placeholder="e.g. movienight" />
-        <button id="joinBtn">Join</button>
+    <div class="stage">
+      <div class="load-row">
+        <input id="ytInput" placeholder="Paste a YouTube link or video ID, then press Load" />
+        <button id="loadBtn">Load</button>
       </div>
-      <div class="status" id="peerStatus">Enter a room code — whoever types the same one lands in the same room.</div>
-      <button class="secondary" id="leaveBtn" style="align-self:flex-start; display:none;">Leave room</button>
+      <div class="player-wrap">
+        <div id="yt-player"></div>
+      </div>
     </div>
 
-    <div class="block">
-      <h2>Video call Controls</h2>
-      <button class="secondary" id="unmuteBtn" style="align-self:flex-start; display:none;">Unmute friend</button>
-      <button class="secondary" id="camBtn" style="align-self:flex-start; display:none;">Toggle Camera</button>
-      <button class="secondary" id="micBtn" style="align-self:flex-start; display:none;">Toggle Mic</button>
-    </div>
-  </div>
-</div>
+    <div class="sidebar">
+      <div class="block">
+        <h2>Room code</h2>
+        <div class="connect-row">
+          <input id="roomInput" placeholder="e.g. movienight" />
+          <button id="joinBtn">Join</button>
+        </div>
+        <div class="status" id="peerStatus">Enter a room code — whoever types the same one lands in the same room.</div>
+        <button class="secondary" id="leaveBtn" style="align-self:flex-start; display:none;">Leave room</button>
+      </div>
 
-<!-- Floating Videos -->
-<div class="video-tile" id="remoteTile">
-  <div class="drag-handle"></div>
-  <video id="remoteVideo" autoplay playsinline></video>
-</div>
-
-<!-- Permission Modal -->
-<div id="permissionModal" class="modal-overlay">
-  <div class="modal-content">
-    <h2>Enable Camera & Mic</h2>
-    <p>Please allow access to your camera and microphone to video chat with your friend.</p>
-    <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
-      <button class="secondary" id="denyPermBtn">Cancel</button>
-      <button id="allowPermBtn">Allow</button>
+      <div class="block">
+        <h2>Video call Controls</h2>
+        <button class="secondary" id="unmuteBtn" style="align-self:flex-start; display:none;">Unmute friend</button>
+        <button class="secondary" id="camBtn" style="align-self:flex-start; display:none;">Toggle Camera</button>
+        <button class="secondary" id="micBtn" style="align-self:flex-start; display:none;">Toggle Mic</button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- Status Bar -->
-<div class="status-bar">
-  <div class="status-item">Room: <strong id="sb-room">🔴 Not connected</strong></div>
-  <div class="status-item">Camera: <strong id="sb-cam">🚫 Off</strong></div>
-  <div class="status-item">Mic: <strong id="sb-mic">🚫 Off</strong></div>
-  <div class="status-item">Duration: <strong id="sb-timer">00:00</strong></div>
-  <div class="status-item">Friend: <strong id="sb-friend">None</strong></div>
-  
-</div>
+  <!-- Floating Videos -->
+  <div class="video-tile" id="remoteTile">
+    <div class="drag-handle"></div>
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
 
-<!-- Toast -->
-<div id="toast" class="toast">
-  <span>🟢 Your friend is online!</span>
-  <button id="toastJoinBtn">Join Call</button>
-</div>
+  <!-- Permission Modal -->
+  <div id="permissionModal" class="modal-overlay">
+    <div class="modal-content">
+      <h2>Enable Camera & Mic</h2>
+      <p>Please allow access to your camera and microphone to video chat with your friend.</p>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px;">
+        <button class="secondary" id="denyPermBtn">Cancel</button>
+        <button id="allowPermBtn">Allow</button>
+      </div>
+    </div>
+  </div>
 
-<script>
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div class="status-item">Room: <strong id="sb-room">🔴 Not connected</strong></div>
+    <div class="status-item">Camera: <strong id="sb-cam">🚫 Off</strong></div>
+    <div class="status-item">Mic: <strong id="sb-mic">🚫 Off</strong></div>
+    <div class="status-item">Duration: <strong id="sb-timer">00:00</strong></div>
+    <div class="status-item">Friend: <strong id="sb-friend">None</strong></div>
+
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast">
+    <span>🟢 Your friend is online!</span>
+    <button id="toastJoinBtn">Join Call</button>
+  </div>
+
+  <script>
 
 
-/* ---------- PeerJS setup ---------- */
-let peer, localStream, mediaConn, dataConn, roomHostId, role;
-const peerStatusEl = document.getElementById('peerStatus');
-const remoteVideo = document.getElementById('remoteVideo');
-const remoteTile = document.getElementById('remoteTile');
-const roomInput = document.getElementById('roomInput');
-const leaveBtn = document.getElementById('leaveBtn');
-const joinBtn = document.getElementById('joinBtn');
-const unmuteBtn = document.getElementById('unmuteBtn');
-const camBtn = document.getElementById('camBtn');
-const micBtn = document.getElementById('micBtn');
+    /* ---------- PeerJS setup ---------- */
+    let peer, localStream, mediaConn, dataConn, roomHostId, role;
+    const peerStatusEl = document.getElementById('peerStatus');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const remoteTile = document.getElementById('remoteTile');
+    const roomInput = document.getElementById('roomInput');
+    const leaveBtn = document.getElementById('leaveBtn');
+    const joinBtn = document.getElementById('joinBtn');
+    const unmuteBtn = document.getElementById('unmuteBtn');
+    const camBtn = document.getElementById('camBtn');
+    const micBtn = document.getElementById('micBtn');
 
-// Status bar elements
-const sbRoom = document.getElementById('sb-room');
-const sbCam = document.getElementById('sb-cam');
-const sbMic = document.getElementById('sb-mic');
-const sbTimer = document.getElementById('sb-timer');
-const sbFriend = document.getElementById('sb-friend');
+    // Status bar elements
+    const sbRoom = document.getElementById('sb-room');
+    const sbCam = document.getElementById('sb-cam');
+    const sbMic = document.getElementById('sb-mic');
+    const sbTimer = document.getElementById('sb-timer');
+    const sbFriend = document.getElementById('sb-friend');
 
-const toast = document.getElementById('toast');
-const toastJoinBtn = document.getElementById('toastJoinBtn');
+    const toast = document.getElementById('toast');
+    const toastJoinBtn = document.getElementById('toastJoinBtn');
 
-const ytInput = document.getElementById('ytInput');
-const loadBtn = document.getElementById('loadBtn');
-const PREFERRED_YT_QUALITY = 'hd720';
-const MEDIA_CONSTRAINTS = {
-  video: {
-    width: { ideal: 320 },
-    height: { ideal: 240 },
-    frameRate: { ideal: 15, max: 15 },
-    facingMode: 'user'
-  },
-  audio: {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true
-  }
-};
+    const ytInput = document.getElementById('ytInput');
+    const loadBtn = document.getElementById('loadBtn');
+    const PREFERRED_YT_QUALITY = 'hd720';
+    const MEDIA_CONSTRAINTS = {
+      video: {
+        width: { ideal: 320 },
+        height: { ideal: 240 },
+        frameRate: { ideal: 15, max: 15 },
+        facingMode: 'user'
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    };
 
-let callStartedAt = 0;
-let callTimerId;
+    let callStartedAt = 0;
+    let callTimerId;
 
-function formatCallDuration(totalSeconds){
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if(hours){
-    return hours + ':' + String(minutes).padStart(2,'0') + ':' + String(seconds).padStart(2,'0');
-  }
-  return String(minutes).padStart(2,'0') + ':' + String(seconds).padStart(2,'0');
-}
-
-function renderCallTimer(){
-  const elapsed = callStartedAt ? Math.floor((Date.now() - callStartedAt) / 1000) : 0;
-  sbTimer.textContent = formatCallDuration(elapsed);
-}
-
-function startCallTimer(){
-  if(callStartedAt) return;
-  callStartedAt = Date.now();
-  renderCallTimer();
-  callTimerId = setInterval(renderCallTimer, 1000);
-}
-
-function resetCallTimer(){
-  callStartedAt = 0;
-  if(callTimerId){
-    clearInterval(callTimerId);
-    callTimerId = null;
-  }
-  renderCallTimer();
-}
-
-const ICE_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ]
-};
-
-function sanitizeRoom(code){
-  return code.trim().toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,24);
-}
-
-let streamPromiseResolve = null;
-
-const permissionModal = document.getElementById('permissionModal');
-const allowPermBtn = document.getElementById('allowPermBtn');
-const denyPermBtn = document.getElementById('denyPermBtn');
-
-allowPermBtn.onclick = async () => {
-  permissionModal.style.display = 'none';
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    peerStatusEl.textContent = 'Camera/mic needs a secure browser context.';
-    if(streamPromiseResolve) streamPromiseResolve(null);
-    return;
-  }
-  try{
-    localStream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS);
-  }catch(e){
-    try{
-      localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    }catch(err){
-      peerStatusEl.textContent = 'Camera/mic blocked.';
-      if(streamPromiseResolve) streamPromiseResolve(null);
-      return;
+    function formatCallDuration(totalSeconds) {
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours) {
+        return hours + ':' + String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+      }
+      return String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
     }
-  }
-  tuneLocalStream(localStream);
-  camBtn.style.display = 'inline-block';
-  micBtn.style.display = 'inline-block';
-  updateDeviceStatus();
-  if(streamPromiseResolve) streamPromiseResolve(localStream);
-};
 
-denyPermBtn.onclick = () => {
-  permissionModal.style.display = 'none';
-  if(streamPromiseResolve) streamPromiseResolve(null);
-};
-
-function ensureLocalStream(){
-  return new Promise((resolve) => {
-    if(localStream && localStream.active) {
-      resolve(localStream);
-      return;
+    function renderCallTimer() {
+      const elapsed = callStartedAt ? Math.floor((Date.now() - callStartedAt) / 1000) : 0;
+      sbTimer.textContent = formatCallDuration(elapsed);
     }
-    streamPromiseResolve = resolve;
-    permissionModal.style.display = 'flex';
-  });
-}
 
-// Draggable logic for friend video
-let isDragging = false;
-let offsetX = 0, offsetY = 0;
+    function startCallTimer() {
+      if (callStartedAt) return;
+      callStartedAt = Date.now();
+      renderCallTimer();
+      callTimerId = setInterval(renderCallTimer, 1000);
+    }
 
-remoteTile.addEventListener('mousedown', (e) => {
-  isDragging = true;
-  const rect = remoteTile.getBoundingClientRect();
-  offsetX = e.clientX - rect.left;
-  offsetY = e.clientY - rect.top;
-  // disable pointer events on video while dragging
-  remoteTile.querySelector('video').style.pointerEvents = 'none';
-});
-window.addEventListener('mousemove', (e) => {
-  if(!isDragging) return;
-  remoteTile.style.right = 'auto';
-  remoteTile.style.bottom = 'auto';
-  remoteTile.style.left = (e.clientX - offsetX) + 'px';
-  remoteTile.style.top = (e.clientY - offsetY) + 'px';
-});
-window.addEventListener('mouseup', () => {
-  isDragging = false;
-  // remoteTile.querySelector('video').style.pointerEvents = 'auto'; // optional, keeping none so it always drags
-});
+    function resetCallTimer() {
+      callStartedAt = 0;
+      if (callTimerId) {
+        clearInterval(callTimerId);
+        callTimerId = null;
+      }
+      renderCallTimer();
+    }
 
+    const ICE_CONFIG = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+      ]
+    };
 
-function tuneLocalStream(stream){
-  const videoTrack = stream.getVideoTracks()[0];
-  const audioTrack = stream.getAudioTracks()[0];
-  if(videoTrack && 'contentHint' in videoTrack) videoTrack.contentHint = 'motion';
-  if(audioTrack && 'contentHint' in audioTrack) audioTrack.contentHint = 'speech';
-}
+    function sanitizeRoom(code) {
+      return code.trim().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 24);
+    }
 
-function updateDeviceStatus() {
-  if (localStream) {
-    const videoTrack = localStream.getVideoTracks()[0];
-    const audioTrack = localStream.getAudioTracks()[0];
-    sbCam.textContent = (videoTrack && videoTrack.enabled) ? '✅ On' : '🚫 Off';
-    sbMic.textContent = (audioTrack && audioTrack.enabled) ? '✅ On' : '🚫 Off';
-  } else {
-    sbCam.textContent = '🚫 Off';
-    sbMic.textContent = '🚫 Off';
-  }
-}
+    let streamPromiseResolve = null;
 
-camBtn.onclick = () => {
-  if (localStream) {
-    const track = localStream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
+    const permissionModal = document.getElementById('permissionModal');
+    const allowPermBtn = document.getElementById('allowPermBtn');
+    const denyPermBtn = document.getElementById('denyPermBtn');
+
+    allowPermBtn.onclick = async () => {
+      permissionModal.style.display = 'none';
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        peerStatusEl.textContent = 'Camera/mic needs a secure browser context.';
+        if (streamPromiseResolve) streamPromiseResolve(null);
+        return;
+      }
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS);
+      } catch (e) {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (err) {
+          peerStatusEl.textContent = 'Camera/mic blocked.';
+          if (streamPromiseResolve) streamPromiseResolve(null);
+          return;
+        }
+      }
+      tuneLocalStream(localStream);
+      camBtn.style.display = 'inline-block';
+      micBtn.style.display = 'inline-block';
       updateDeviceStatus();
+      if (streamPromiseResolve) streamPromiseResolve(localStream);
+    };
+
+    denyPermBtn.onclick = () => {
+      permissionModal.style.display = 'none';
+      if (streamPromiseResolve) streamPromiseResolve(null);
+    };
+
+    function ensureLocalStream() {
+      return new Promise((resolve) => {
+        if (localStream && localStream.active) {
+          resolve(localStream);
+          return;
+        }
+        streamPromiseResolve = resolve;
+        permissionModal.style.display = 'flex';
+      });
     }
-  }
-};
-micBtn.onclick = () => {
-  if (localStream) {
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      updateDeviceStatus();
+
+    // Draggable logic for friend video
+    let isDragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    remoteTile.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      const rect = remoteTile.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      // disable pointer events on video while dragging
+      remoteTile.querySelector('video').style.pointerEvents = 'none';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      remoteTile.style.right = 'auto';
+      remoteTile.style.bottom = 'auto';
+      remoteTile.style.left = (e.clientX - offsetX) + 'px';
+      remoteTile.style.top = (e.clientY - offsetY) + 'px';
+    });
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+      // remoteTile.querySelector('video').style.pointerEvents = 'auto'; // optional, keeping none so it always drags
+    });
+
+
+    function tuneLocalStream(stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+      if (videoTrack && 'contentHint' in videoTrack) videoTrack.contentHint = 'motion';
+      if (audioTrack && 'contentHint' in audioTrack) audioTrack.contentHint = 'speech';
     }
-  }
-};
+
+    function updateDeviceStatus() {
+      if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        const audioTrack = localStream.getAudioTracks()[0];
+        sbCam.textContent = (videoTrack && videoTrack.enabled) ? '✅ On' : '🚫 Off';
+        sbMic.textContent = (audioTrack && audioTrack.enabled) ? '✅ On' : '🚫 Off';
+      } else {
+        sbCam.textContent = '🚫 Off';
+        sbMic.textContent = '🚫 Off';
+      }
+    }
+
+    camBtn.onclick = () => {
+      if (localStream) {
+        const track = localStream.getVideoTracks()[0];
+        if (track) {
+          track.enabled = !track.enabled;
+          updateDeviceStatus();
+        }
+      }
+    };
+    micBtn.onclick = () => {
+      if (localStream) {
+        const track = localStream.getAudioTracks()[0];
+        if (track) {
+          track.enabled = !track.enabled;
+          updateDeviceStatus();
+        }
+      }
+    };
 
 
-function tuneMediaConnection(conn){
-  if(!conn) return;
+    function tuneMediaConnection(conn) {
+      if (!conn) return;
 
-  const applySenderLimits = () => {
-    const pc = conn.peerConnection || conn._pc;
-    if(!pc || !pc.getSenders) return;
+      const applySenderLimits = () => {
+        const pc = conn.peerConnection || conn._pc;
+        if (!pc || !pc.getSenders) return;
 
-    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-    if(!sender || !sender.getParameters || !sender.setParameters) return;
+        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (!sender || !sender.getParameters || !sender.setParameters) return;
 
-    const params = sender.getParameters();
-    if(!params.encodings || !params.encodings.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = 200000; // Low quality 200kbps
-    params.encodings[0].maxFramerate = 15;
-    sender.setParameters(params).catch(()=>{});
-  };
+        const params = sender.getParameters();
+        if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+        params.encodings[0].maxBitrate = 200000; // Low quality 200kbps
+        params.encodings[0].maxFramerate = 15;
+        sender.setParameters(params).catch(() => { });
+      };
 
-  applySenderLimits();
-  setTimeout(applySenderLimits, 800);
-}
+      applySenderLimits();
+      setTimeout(applySenderLimits, 800);
+    }
 
-function attachRemoteStream(remoteStream){
-  remoteVideo.srcObject = remoteStream;
-  remoteVideo.play().catch(()=>{});
-  remoteTile.style.display = 'block';
-  unmuteBtn.style.display = 'inline-block';
-  sbFriend.textContent = 'Connected ✅';
-  startCallTimer();
-  toast.classList.remove('show');
-}
+    function attachRemoteStream(remoteStream) {
+      remoteVideo.srcObject = remoteStream;
+      remoteVideo.play().catch(() => { });
+      remoteTile.style.display = 'block';
+      unmuteBtn.style.display = 'inline-block';
+      sbFriend.textContent = 'Connected ✅';
+      startCallTimer();
+      toast.classList.remove('show');
+    }
 
-function cleanupRoom(options = {}){
-  const stopLocal = !!options.stopLocal;
-  const resetStatus = options.resetStatus !== false;
+    function cleanupRoom(options = {}) {
+      const stopLocal = !!options.stopLocal;
+      const resetStatus = options.resetStatus !== false;
 
-  if(dataConn){ try{ dataConn.close(); }catch(e){} }
-  if(mediaConn){ try{ mediaConn.close(); }catch(e){} }
-  if(peer){ try{ peer.destroy(); }catch(e){} }
+      if (dataConn) { try { dataConn.close(); } catch (e) { } }
+      if (mediaConn) { try { mediaConn.close(); } catch (e) { } }
+      if (peer) { try { peer.destroy(); } catch (e) { } }
 
-  dataConn = null;
-  mediaConn = null;
-  peer = null;
-  roomHostId = null;
-  role = null;
-  remoteVideo.srcObject = null;
-  remoteTile.style.display = 'none';
-  unmuteBtn.style.display = 'none';
-  sbFriend.textContent = 'None';
-  resetCallTimer();
-  leaveBtn.style.display = 'none';
-
-  if(stopLocal && localStream){
-    localStream.getTracks().forEach(track => track.stop());
-    localStream = null;
-    camBtn.style.display = 'none';
-    micBtn.style.display = 'none';
-    updateDeviceStatus();
-  }
-
-  if(resetStatus) setStatus(false);
-}
-
-function showFriendOnlineToast() {
-  if (!mediaConn) {
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 8000);
-  }
-}
-
-toastJoinBtn.onclick = async () => {
-  toast.classList.remove('show');
-  const stream = await ensureLocalStream();
-  if (stream && dataConn && dataConn.open) {
-    const targetId = dataConn.peer;
-    const call = peer.call(targetId, stream);
-    mediaConn = call;
-    call.on('stream', remoteStream => attachRemoteStream(remoteStream));
-    call.on('close', () => {
+      dataConn = null;
+      mediaConn = null;
+      peer = null;
+      roomHostId = null;
+      role = null;
       remoteVideo.srcObject = null;
       remoteTile.style.display = 'none';
+      unmuteBtn.style.display = 'none';
+      sbFriend.textContent = 'None';
       resetCallTimer();
-    });
-    tuneMediaConnection(call);
-  }
-};
+      leaveBtn.style.display = 'none';
 
-function bindPeerHandlers(){
-  const activePeer = peer;
-
-  activePeer.on('call', async call => {
-    if(peer !== activePeer) return;
-    const stream = await ensureLocalStream();
-    if(peer !== activePeer) return;
-    call.answer(stream || undefined);
-    call.on('stream', remoteStream => attachRemoteStream(remoteStream));
-    call.on('close', () => {
-      if(mediaConn === call){
-        remoteVideo.srcObject = null;
-        remoteTile.style.display = 'none';
-        resetCallTimer();
+      if (stopLocal && localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+        camBtn.style.display = 'none';
+        micBtn.style.display = 'none';
+        updateDeviceStatus();
       }
-    });
-    mediaConn = call;
-    tuneMediaConnection(call);
-  });
 
-  activePeer.on('connection', conn => {
-    if(peer !== activePeer) return;
-    dataConn = conn;
-    dataConn.on('open', () => { 
-      setStatus(true); 
-      flushQueue(); 
-      showFriendOnlineToast();
-    });
-    wireData(conn);
-  });
-
-  activePeer.on('disconnected', () => {
-    if(peer === activePeer) setStatus(false, 'Disconnected — trying to reconnect…');
-  });
-  activePeer.on('close', () => {
-    if(peer === activePeer) setStatus(false);
-  });
-}
-
-async function joinRoom(code){
-  if(peer) cleanupRoom({ stopLocal:false, resetStatus:false });
-  roomHostId = 'room-' + code;
-  peerStatusEl.textContent = 'Joining "' + code + '"…';
-  sbRoom.textContent = '🟡 Connecting...';
-
-  peer = new Peer(roomHostId, { config: ICE_CONFIG });
-  bindPeerHandlers();
-
-  peer.on('open', () => {
-    role = 'host';
-    peerStatusEl.textContent = 'Room "' + code + '" created — waiting for your friend to join…';
-    sbRoom.textContent = '🟢 ' + code;
-    leaveBtn.style.display = 'inline-block';
-  });
-
-  peer.on('error', err => {
-    if(err.type === 'unavailable-id'){
-      joinAsGuest(code, roomHostId);
-    }else{
-      peerStatusEl.textContent = 'Connection error: ' + err.type;
-      sbRoom.textContent = '🔴 Error';
+      if (resetStatus) setStatus(false);
     }
-  });
-}
 
-function joinAsGuest(code, hostId){
-  const oldPeer = peer;
-  if(oldPeer){ try{ oldPeer.destroy(); }catch(e){} }
-  roomHostId = hostId;
+    function showFriendOnlineToast() {
+      if (!mediaConn) {
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 8000);
+      }
+    }
 
-  const guestId = hostId + '-' + Math.random().toString(36).slice(2, 8);
-  peer = new Peer(guestId, { config: ICE_CONFIG });
-  bindPeerHandlers();
-  peerStatusEl.textContent = 'Room "' + code + '" found — connecting…';
-  sbRoom.textContent = '🟡 Connecting...';
+    toastJoinBtn.onclick = async () => {
+      toast.classList.remove('show');
+      const stream = await ensureLocalStream();
+      if (stream && dataConn && dataConn.open) {
+        const targetId = dataConn.peer;
+        const call = peer.call(targetId, stream);
+        mediaConn = call;
+        call.on('stream', remoteStream => attachRemoteStream(remoteStream));
+        call.on('close', () => {
+          remoteVideo.srcObject = null;
+          remoteTile.style.display = 'none';
+          resetCallTimer();
+        });
+        tuneMediaConnection(call);
+      }
+    };
 
-  peer.on('open', () => {
-    role = 'guest';
-    sbRoom.textContent = '🟢 ' + code;
-    leaveBtn.style.display = 'inline-block';
+    function bindPeerHandlers() {
+      const activePeer = peer;
 
-    dataConn = peer.connect(roomHostId, { reliable:true });
-    dataConn.on('open', () => { 
-      setStatus(true); 
-      flushQueue(); 
-      showFriendOnlineToast();
-    });
-    wireData(dataConn);
-    
-    // We do NOT auto-call media here, we wait for user to click Toast or Join Video
-  });
+      activePeer.on('call', async call => {
+        if (peer !== activePeer) return;
+        const stream = await ensureLocalStream();
+        if (peer !== activePeer) return;
+        call.answer(stream || undefined);
+        call.on('stream', remoteStream => attachRemoteStream(remoteStream));
+        call.on('close', () => {
+          if (mediaConn === call) {
+            remoteVideo.srcObject = null;
+            remoteTile.style.display = 'none';
+            resetCallTimer();
+          }
+        });
+        mediaConn = call;
+        tuneMediaConnection(call);
+      });
 
-  peer.on('error', err => {
-    peerStatusEl.textContent = 'Connection error: ' + err.type;
-    sbRoom.textContent = '🔴 Error';
-  });
-}
+      activePeer.on('connection', conn => {
+        if (peer !== activePeer) return;
+        dataConn = conn;
+        dataConn.on('open', () => {
+          setStatus(true);
+          flushQueue();
+          showFriendOnlineToast();
+        });
+        wireData(conn);
+      });
 
-joinBtn.onclick = () => {
-  const code = sanitizeRoom(roomInput.value);
-  if(!code){ alert('Type a room code first.'); return; }
-  joinRoom(code);
-};
+      activePeer.on('disconnected', () => {
+        if (peer === activePeer) setStatus(false, 'Disconnected — trying to reconnect…');
+      });
+      activePeer.on('close', () => {
+        if (peer === activePeer) setStatus(false);
+      });
+    }
 
-leaveBtn.onclick = () => {
-  cleanupRoom({ stopLocal:true });
-  peerStatusEl.textContent = 'Enter a room code — whoever types the same one lands in the same room.';
-  sbRoom.textContent = '🔴 Not connected';
-};
+    async function joinRoom(code) {
+      if (peer) cleanupRoom({ stopLocal: false, resetStatus: false });
+      roomHostId = 'room-' + code;
+      peerStatusEl.textContent = 'Joining "' + code + '"…';
+      sbRoom.textContent = '🟡 Connecting...';
 
-unmuteBtn.onclick = () => {
-  remoteVideo.muted = !remoteVideo.muted;
-  unmuteBtn.textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
-};
+      peer = new Peer(roomHostId, { config: ICE_CONFIG });
+      bindPeerHandlers();
 
-function setStatus(live, message){
-  peerStatusEl.textContent = message || (live ? 'Connected' : 'Disconnected');
-  peerStatusEl.className = 'status' + (live ? ' live' : '');
-}
+      peer.on('open', () => {
+        role = 'host';
+        peerStatusEl.textContent = 'Room "' + code + '" created — waiting for your friend to join…';
+        sbRoom.textContent = '🟢 ' + code;
+        leaveBtn.style.display = 'inline-block';
+      });
 
-/* ---------- Data channel: sync YouTube playback ---------- */
-let applyingRemote = false;
-let outQueue = [];
-let inQueue = [];
-let remoteApplyTimer;
-let playbackMonitorId;
-let lastMonitorAt = 0;
-const wiredDataConnections = new WeakSet();
+      peer.on('error', err => {
+        if (err.type === 'unavailable-id') {
+          joinAsGuest(code, roomHostId);
+        } else {
+          peerStatusEl.textContent = 'Connection error: ' + err.type;
+          sbRoom.textContent = '🔴 Error';
+        }
+      });
+    }
 
-function wireData(conn = dataConn){
-  if(!conn || wiredDataConnections.has(conn)) return;
-  wiredDataConnections.add(conn);
+    function joinAsGuest(code, hostId) {
+      const oldPeer = peer;
+      if (oldPeer) { try { oldPeer.destroy(); } catch (e) { } }
+      roomHostId = hostId;
 
-  conn.on('data', msg => {
+      const guestId = hostId + '-' + Math.random().toString(36).slice(2, 8);
+      peer = new Peer(guestId, { config: ICE_CONFIG });
+      bindPeerHandlers();
+      peerStatusEl.textContent = 'Room "' + code + '" found — connecting…';
+      sbRoom.textContent = '🟡 Connecting...';
 
-    if(!player || !playerReady){ inQueue.push(msg); return; }
-    applyIncoming(msg);
-  });
-  conn.on('close', () => {
-    if(dataConn === conn) setStatus(false);
-  });
-}
+      peer.on('open', () => {
+        role = 'guest';
+        sbRoom.textContent = '🟢 ' + code;
+        leaveBtn.style.display = 'inline-block';
 
-function applyIncoming(msg){
-  if(!msg || !msg.type) return;
-  applyingRemote = true;
-  clearTimeout(remoteApplyTimer);
+        dataConn = peer.connect(roomHostId, { reliable: true });
+        dataConn.on('open', () => {
+          setStatus(true);
+          flushQueue();
+          showFriendOnlineToast();
+        });
+        wireData(dataConn);
 
-  if(msg.type === 'load'){
-    loadYouTubeVideo(msg.videoId, msg.time || 0);
-  } else if(msg.type === 'play'){
-    player.seekTo(msg.time, true);
-    player.playVideo();
-  } else if(msg.type === 'pause'){
-    player.seekTo(msg.time, true);
-    player.pauseVideo();
-  } else if(msg.type === 'seek'){
-    player.seekTo(msg.time, true);
-  }
+        // We do NOT auto-call media here, we wait for user to click Toast or Join Video
+      });
 
-  if(typeof msg.time === 'number') lastKnownTime = msg.time;
-  remoteApplyTimer = setTimeout(()=> applyingRemote = false, 600);
-}
+      peer.on('error', err => {
+        peerStatusEl.textContent = 'Connection error: ' + err.type;
+        sbRoom.textContent = '🔴 Error';
+      });
+    }
 
-function flushQueue(){
-  if(dataConn && dataConn.open){
-    while(outQueue.length) dataConn.send(outQueue.shift());
-  }
-}
+    joinBtn.onclick = () => {
+      const code = sanitizeRoom(roomInput.value);
+      if (!code) { alert('Type a room code first.'); return; }
+      joinRoom(code);
+    };
 
-function queueSync(payload){
-  if(payload.type === 'load'){
-    outQueue = [];
-  } else if(payload.type === 'play' || payload.type === 'pause' || payload.type === 'seek'){
-    outQueue = outQueue.filter(msg => msg.type === 'load');
-  }
-  outQueue.push(payload);
-  if(outQueue.length > 6) outQueue = outQueue.slice(-6);
-}
+    leaveBtn.onclick = () => {
+      cleanupRoom({ stopLocal: true });
+      peerStatusEl.textContent = 'Enter a room code — whoever types the same one lands in the same room.';
+      sbRoom.textContent = '🔴 Not connected';
+    };
 
-function sendSync(payload){
-  if(applyingRemote) return;
-  if(dataConn && dataConn.open){
-    dataConn.send(payload);
-  }else{
-    queueSync(payload);
-  }
-}
+    unmuteBtn.onclick = () => {
+      remoteVideo.muted = !remoteVideo.muted;
+      unmuteBtn.textContent = remoteVideo.muted ? 'Unmute friend' : 'Mute friend';
+    };
 
-/* ---------- YouTube IFrame player ---------- */
-let player;
-let playerReady = false;
-let lastKnownTime = 0;
+    function setStatus(live, message) {
+      peerStatusEl.textContent = message || (live ? 'Connected' : 'Disconnected');
+      peerStatusEl.className = 'status' + (live ? ' live' : '');
+    }
 
-function buildPlayerVars(){
-  const vars = { rel:0, modestbranding:1, playsinline:1, iv_load_policy:3, enablejsapi:1 };
-  if(window.location.protocol === 'http:' || window.location.protocol === 'https:'){
-    vars.origin = window.location.origin;
-  }
-  return vars;
-}
+    /* ---------- Data channel: sync YouTube playback ---------- */
+    let applyingRemote = false;
+    let outQueue = [];
+    let inQueue = [];
+    let remoteApplyTimer;
+    let playbackMonitorId;
+    let lastMonitorAt = 0;
+    const wiredDataConnections = new WeakSet();
 
-function onYouTubeIframeAPIReady(){
-  player = new YT.Player('yt-player', {
-    height: '100%',
-    width: '100%',
-    playerVars: buildPlayerVars(),
-    events: {
-      onReady: () => {
-        playerReady = true;
+    function wireData(conn = dataConn) {
+      if (!conn || wiredDataConnections.has(conn)) return;
+      wiredDataConnections.add(conn);
+
+      conn.on('data', msg => {
+
+        if (!player || !playerReady) { inQueue.push(msg); return; }
+        applyIncoming(msg);
+      });
+      conn.on('close', () => {
+        if (dataConn === conn) setStatus(false);
+      });
+    }
+
+    function applyIncoming(msg) {
+      if (!msg || !msg.type) return;
+      applyingRemote = true;
+      clearTimeout(remoteApplyTimer);
+
+      if (msg.type === 'load') {
+        loadYouTubeVideo(msg.videoId, msg.time || 0);
+      } else if (msg.type === 'play') {
+        player.seekTo(msg.time, true);
+        player.playVideo();
+      } else if (msg.type === 'pause') {
+        player.seekTo(msg.time, true);
+        player.pauseVideo();
+      } else if (msg.type === 'seek') {
+        player.seekTo(msg.time, true);
+      }
+
+      if (typeof msg.time === 'number') lastKnownTime = msg.time;
+      remoteApplyTimer = setTimeout(() => applyingRemote = false, 600);
+    }
+
+    function flushQueue() {
+      if (dataConn && dataConn.open) {
+        while (outQueue.length) dataConn.send(outQueue.shift());
+      }
+    }
+
+    function queueSync(payload) {
+      if (payload.type === 'load') {
+        outQueue = [];
+      } else if (payload.type === 'play' || payload.type === 'pause' || payload.type === 'seek') {
+        outQueue = outQueue.filter(msg => msg.type === 'load');
+      }
+      outQueue.push(payload);
+      if (outQueue.length > 6) outQueue = outQueue.slice(-6);
+    }
+
+    function sendSync(payload) {
+      if (applyingRemote) return;
+      if (dataConn && dataConn.open) {
+        dataConn.send(payload);
+      } else {
+        queueSync(payload);
+      }
+    }
+
+    /* ---------- YouTube IFrame player ---------- */
+    let player;
+    let playerReady = false;
+    let lastKnownTime = 0;
+
+    function buildPlayerVars() {
+      const vars = { rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, enablejsapi: 1 };
+      if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+        vars.origin = window.location.origin;
+      }
+      return vars;
+    }
+
+    function onYouTubeIframeAPIReady() {
+      player = new YT.Player('yt-player', {
+        height: '100%',
+        width: '100%',
+        playerVars: buildPlayerVars(),
+        events: {
+          onReady: () => {
+            playerReady = true;
+            preferPlaybackQuality();
+            startPlaybackMonitor();
+            while (inQueue.length) applyIncoming(inQueue.shift());
+          },
+          onStateChange: onPlayerStateChange
+        }
+      });
+    }
+    const ytTag = document.createElement('script');
+    ytTag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(ytTag);
+
+    function preferPlaybackQuality() {
+      if (!player || !player.setPlaybackQuality) return;
+      try { player.setPlaybackQuality(PREFERRED_YT_QUALITY); } catch (e) { }
+    }
+
+    function loadYouTubeVideo(videoId, startSeconds = 0) {
+      const request = { videoId, suggestedQuality: PREFERRED_YT_QUALITY };
+      if (startSeconds > 0) request.startSeconds = startSeconds;
+      player.loadVideoById(request);
+      preferPlaybackQuality();
+    }
+
+    function onPlayerStateChange(e) {
+      if (applyingRemote) return;
+      const time = player.getCurrentTime();
+      if (e.data === YT.PlayerState.PLAYING) {
         preferPlaybackQuality();
-        startPlaybackMonitor();
-        while(inQueue.length) applyIncoming(inQueue.shift());
-      },
-      onStateChange: onPlayerStateChange
-    }
-  });
-}
-const ytTag = document.createElement('script');
-ytTag.src = "https://www.youtube.com/iframe_api";
-document.head.appendChild(ytTag);
-
-function preferPlaybackQuality(){
-  if(!player || !player.setPlaybackQuality) return;
-  try{ player.setPlaybackQuality(PREFERRED_YT_QUALITY); }catch(e){}
-}
-
-function loadYouTubeVideo(videoId, startSeconds = 0){
-  const request = { videoId, suggestedQuality: PREFERRED_YT_QUALITY };
-  if(startSeconds > 0) request.startSeconds = startSeconds;
-  player.loadVideoById(request);
-  preferPlaybackQuality();
-}
-
-function onPlayerStateChange(e){
-  if(applyingRemote) return;
-  const time = player.getCurrentTime();
-  if(e.data === YT.PlayerState.PLAYING){
-    preferPlaybackQuality();
-    sendSync({ type:'play', time });
-  } else if(e.data === YT.PlayerState.PAUSED){
-    sendSync({ type:'pause', time });
-  }
-  lastKnownTime = time;
-  lastMonitorAt = performance.now();
-}
-
-function startPlaybackMonitor(){
-  if(playbackMonitorId) return;
-  playbackMonitorId = setInterval(() => {
-    if(!player || !playerReady || applyingRemote) return;
-
-    const state = player.getPlayerState();
-    const time = player.getCurrentTime();
-    const now = performance.now();
-    const elapsed = lastMonitorAt ? (now - lastMonitorAt) / 1000 : 0;
-    const actualDelta = time - lastKnownTime;
-    const expectedDelta = state === YT.PlayerState.PLAYING ? elapsed : 0;
-    const jumped = state === YT.PlayerState.PLAYING
-      ? Math.abs(actualDelta - expectedDelta) > 1.5
-      : Math.abs(actualDelta) > 0.75;
-
-    if(jumped && dataConn && dataConn.open){
-      sendSync({ type:'seek', time });
-    }
-
-    lastKnownTime = time;
-    lastMonitorAt = now;
-  }, 1000);
-}
-
-function cleanVideoId(id){
-  return /^[\w-]{11}$/.test(id || '') ? id : null;
-}
-
-function isExpectedYouTubeHost(host, root){
-  return host === root || host.endsWith('.' + root);
-}
-
-function extractVideoId(input){
-  const value = input.trim();
-  if(cleanVideoId(value)) return value;
-
-  try{
-    const url = new URL(value);
-    const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '');
-    const parts = url.pathname.split('/').filter(Boolean);
-
-    if(host === 'youtu.be') return cleanVideoId(parts[0]);
-    if(isExpectedYouTubeHost(host, 'youtube.com') || isExpectedYouTubeHost(host, 'youtube-nocookie.com')){
-      const queryId = cleanVideoId(url.searchParams.get('v'));
-      if(queryId) return queryId;
-
-      if(parts[0] === 'embed' || parts[0] === 'shorts' || parts[0] === 'live'){
-        return cleanVideoId(parts[1]);
+        sendSync({ type: 'play', time });
+      } else if (e.data === YT.PlayerState.PAUSED) {
+        sendSync({ type: 'pause', time });
       }
+      lastKnownTime = time;
+      lastMonitorAt = performance.now();
     }
-  }catch(e){
-    const match = value.match(/(?:v=|\/)([\w-]{11})(?:[?&#/]|$)/);
-    if(match) return cleanVideoId(match[1]);
-  }
 
-  return null;
-}
+    function startPlaybackMonitor() {
+      if (playbackMonitorId) return;
+      playbackMonitorId = setInterval(() => {
+        if (!player || !playerReady || applyingRemote) return;
 
-loadBtn.onclick = () => {
-  const raw = ytInput.value;
-  const id = extractVideoId(raw);
-  if(!id){ alert('Could not read a video ID from that link.'); return; }
-  if(!player || !playerReady){ alert('Player is still loading, try again in a second.'); return; }
-  loadYouTubeVideo(id);
-  sendSync({ type:'load', videoId:id });
-};
+        const state = player.getPlayerState();
+        const time = player.getCurrentTime();
+        const now = performance.now();
+        const elapsed = lastMonitorAt ? (now - lastMonitorAt) / 1000 : 0;
+        const actualDelta = time - lastKnownTime;
+        const expectedDelta = state === YT.PlayerState.PLAYING ? elapsed : 0;
+        const jumped = state === YT.PlayerState.PLAYING
+          ? Math.abs(actualDelta - expectedDelta) > 1.5
+          : Math.abs(actualDelta) > 0.75;
 
-</script>
+        if (jumped && dataConn && dataConn.open) {
+          sendSync({ type: 'seek', time });
+        }
+
+        lastKnownTime = time;
+        lastMonitorAt = now;
+      }, 1000);
+    }
+
+    function cleanVideoId(id) {
+      return /^[\w-]{11}$/.test(id || '') ? id : null;
+    }
+
+    function isExpectedYouTubeHost(host, root) {
+      return host === root || host.endsWith('.' + root);
+    }
+
+    function extractVideoId(input) {
+      const value = input.trim();
+      if (cleanVideoId(value)) return value;
+
+      try {
+        const url = new URL(value);
+        const host = url.hostname.replace(/^www\./, '').replace(/^m\./, '');
+        const parts = url.pathname.split('/').filter(Boolean);
+
+        if (host === 'youtu.be') return cleanVideoId(parts[0]);
+        if (isExpectedYouTubeHost(host, 'youtube.com') || isExpectedYouTubeHost(host, 'youtube-nocookie.com')) {
+          const queryId = cleanVideoId(url.searchParams.get('v'));
+          if (queryId) return queryId;
+
+          if (parts[0] === 'embed' || parts[0] === 'shorts' || parts[0] === 'live') {
+            return cleanVideoId(parts[1]);
+          }
+        }
+      } catch (e) {
+        const match = value.match(/(?:v=|\/)([\w-]{11})(?:[?&#/]|$)/);
+        if (match) return cleanVideoId(match[1]);
+      }
+
+      return null;
+    }
+
+    loadBtn.onclick = () => {
+      const raw = ytInput.value;
+      const id = extractVideoId(raw);
+      if (!id) { alert('Could not read a video ID from that link.'); return; }
+      if (!player || !playerReady) { alert('Player is still loading, try again in a second.'); return; }
+      loadYouTubeVideo(id);
+      sendSync({ type: 'load', videoId: id });
+    };
+
+  </script>
 
 </body>
+
 </html>

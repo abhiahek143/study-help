@@ -11,7 +11,7 @@ Together is a simple browser app for watching YouTube videos with a friend while
 - Keep a call timer while the remote video stream is active
 - No app ads, backend, database, account system, or saved user data
 
-## Tech Stack
+## Tech Stack 
 
 - HTML, CSS, and vanilla JavaScript
 - PeerJS for WebRTC peer connections
